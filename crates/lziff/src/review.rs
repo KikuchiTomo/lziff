@@ -212,3 +212,11 @@ fn make_provider(id: &str) -> Option<Box<dyn ReviewProvider>> {
         _ => None,
     }
 }
+
+/// Provider used by the picker before any spec is known. Today we only
+/// have one backend, so this is just `make_provider("github")`; the
+/// indirection is here so a future multi-backend host has a single
+/// override point.
+pub fn make_picker_provider() -> Option<Box<dyn ReviewProvider>> {
+    make_provider("github")
+}

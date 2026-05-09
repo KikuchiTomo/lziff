@@ -3,12 +3,13 @@ mod config;
 mod diff;
 mod i18n;
 mod keys;
+mod picker;
 mod review;
 mod review_session;
 mod source;
 mod ui;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use app::App;
 use clap::Parser;
 use crossterm::{
@@ -74,8 +75,16 @@ struct Cli {
     /// configured review backend (default: GitHub via `gh` CLI). When
     /// the user is already on the PR's branch the diff runs in place;
     /// otherwise lziff fetches the head into a `git worktree` under
-    /// `~/.cache/lziff/review/` and cleans it up on exit.
-    #[arg(long, value_name = "PR", conflicts_with_all = ["staged", "commit", "range"])]
+    /// `~/.cache/lziff/review/` and cleans it up on exit. Pass `--review`
+    /// alone (no value) to open a picker listing PRs with you as a
+    /// requested reviewer.
+    #[arg(
+        long,
+        value_name = "PR",
+        num_args = 0..=1,
+        default_missing_value = "",
+        conflicts_with_all = ["staged", "commit", "range"]
+    )]
     review: Option<String>,
 }
 
@@ -139,7 +148,24 @@ fn prepare(cli: &Cli) -> Result<Prep> {
     let cwd = std::env::current_dir()?;
 
     if let Some(spec) = &cli.review {
-        let opened = review::open(spec)?;
+        // `--review` (no value) lands here as an empty string thanks to
+        // clap's `default_missing_value`. Open the picker first to turn
+        // it into a concrete PR ref, then fall through to the normal
+        // open path.
+        let resolved: String = if spec.is_empty() {
+            let provider =
+                review::make_picker_provider().context("no review backend available")?;
+            match picker::pick_pr(provider.as_ref())? {
+                Some(n) => n.to_string(),
+                None => {
+                    eprintln!("lziff: cancelled.");
+                    std::process::exit(0);
+                }
+            }
+        } else {
+            spec.clone()
+        };
+        let opened = review::open(&resolved)?;
         return Ok(Prep {
             source: opened.source,
             cleanup: Some(opened.guard),
