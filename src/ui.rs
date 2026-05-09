@@ -62,7 +62,7 @@ fn render_title(f: &mut Frame, area: Rect, app: &App) {
     let (a, d, m) = app.change_summary();
     let title = Line::from(vec![
         Span::styled(
-            " vdiff ",
+            " lziff ",
             Style::default()
                 .add_modifier(Modifier::BOLD)
                 .bg(Color::Rgb(60, 90, 140))

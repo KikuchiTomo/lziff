@@ -1,13 +1,13 @@
 [package]
-name = "vdiff"
+name = "lziff"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "A cross-platform TUI diff & review tool with JetBrains-style side-by-side diffs"
-repository = "https://github.com/tomokikuchi/vdiff"
+description = "A cross-platform TUI diff & review tool with JetBrains-style snap-aligned side-by-side diffs"
+repository = "https://github.com/KikuchiTomo/lziff"
 
 [[bin]]
-name = "vdiff"
+name = "lziff"
 path = "src/main.rs"
 
 [dependencies]

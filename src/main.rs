@@ -20,7 +20,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// vdiff — TUI diff & review tool
+/// lziff — TUI diff & review tool
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Cli {
