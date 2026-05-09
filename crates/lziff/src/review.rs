@@ -42,17 +42,27 @@ pub struct OpenedReview {
 /// up the PR, ensure a worktree, and hand the host a `GitSource::range`
 /// that diffs `base_sha..head_sha`.
 pub fn open(spec: &str) -> Result<OpenedReview> {
-    // Pick the backend. Today there's only `github`; a future
-    // GitLab/Gitea backend just adds a branch above this.
+    // Setup is sequential and each step (gh fetch, base ref fetch,
+    // worktree add) takes seconds on a fresh PR. We print short progress
+    // lines to stderr so the user can tell the tool isn't hung — these
+    // run *before* `enable_raw_mode`, so they show in the normal terminal
+    // and disappear when the alternate screen is entered.
+    progress("resolving review backend");
     let provider = make_provider("github").context("no review backend available")?;
     provider.check_ready().map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let pr_ref = parse_spec(spec);
+    progress(&format!("looking up PR ({spec})"));
     let pr = provider
         .get_pull_request(pr_ref)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
+    progress(&format!(
+        "PR #{} {} ({} → {})",
+        pr.number, pr.title, pr.branch, pr.base
+    ));
 
     let cache_root = cache_root_for_review()?;
+    progress("setting up worktree");
     let handle = provider
         .ensure_worktree(&pr, cache_root.to_string_lossy().as_ref())
         .map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -67,9 +77,11 @@ pub fn open(spec: &str) -> Result<OpenedReview> {
     // landed after the PR diverged).
     let mut pr = pr;
     if pr.base_sha.is_empty() {
+        progress(&format!("resolving base sha ({})", pr.base));
         pr.base_sha = resolve_base_sha(&workdir, &pr.base, &pr.head_sha)
             .with_context(|| format!("resolve base sha for {}", pr.base))?;
     }
+    progress("loading diff");
     let source = GitSource::range(&workdir, &pr.base_sha, &pr.head_sha)?;
 
     let guard = WorktreeGuard {
@@ -112,6 +124,16 @@ impl Drop for WorktreeGuard {
             let _ = std::fs::remove_dir_all(&p);
         }
     }
+}
+
+/// One-line progress notice on stderr. We deliberately keep these short
+/// and unstyled — they're meant to scroll past as setup proceeds, not to
+/// be a structured UI. Anything that wants a proper TUI should wait until
+/// after `enable_raw_mode`.
+fn progress(msg: &str) {
+    use std::io::Write;
+    let _ = writeln!(std::io::stderr(), "lziff: {msg}…");
+    let _ = std::io::stderr().flush();
 }
 
 /// Fetch `base_ref` from origin and return the merge-base with `head_sha`.
