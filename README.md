@@ -3,16 +3,7 @@
 A cross-platform terminal diff & review tool with JetBrains-style
 snap-aligned side-by-side diffs.
 
-```
- [Old] HEAD:src/foo.rs ↔ [New] worktree:src/foo.rs    +12 -3 ~7
-┌────────────────────────┐  ●───●  ┌──────────────────────────┐
-│ 42  fn validate(...) { │         │ 42  fn validate(...) {   │
-│ 43      check_one();   │  │   │  │ 43      check_one();     │
-│ 44      check_two();   │  ●───●  │ 44      check_two();     │
-│ 45  }                  │         │ 45      check_three();   │
-│                        │  │   │  │ 46  }                    │
-└────────────────────────┘         └──────────────────────────┘
-```
+<!-- screenshot here -->
 
 ## What it does
 
