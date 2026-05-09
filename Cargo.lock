@@ -399,7 +399,7 @@ dependencies = [
 
 [[package]]
 name = "lziff"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -418,7 +418,7 @@ dependencies = [
 
 [[package]]
 name = "lziff-github"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "review-protocol",
@@ -546,7 +546,7 @@ dependencies = [
 
 [[package]]
 name = "review-protocol"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "serde",

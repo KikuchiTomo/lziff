@@ -12,6 +12,62 @@ under `## [vX.Y.Z] - YYYY-MM-DD`, with the standard subsection headings
 
 ## [Unreleased]
 
+## [v0.1.2] - 2026-05-09
+
+### Added
+
+- PR picker. Running `lziff --review` with no argument opens a small
+  TUI that lists open PRs with the current user as a requested
+  reviewer (`review-requested:@me`). Up/Down or j/k to move, Enter
+  to open, Esc/q to cancel.
+- Setup progress on stderr. `--review` now prints short status lines
+  while resolving the backend, looking up the PR, fetching, setting
+  up the worktree, and resolving the base SHA, so the tool no longer
+  looks hung during the initial seconds.
+- Drafts list modal. New `d` keybind shows every buffered draft
+  comment in a list — Enter re-opens the comment modal pre-filled
+  with the existing body (saving replaces in place), `x` / `Del`
+  removes the draft, Esc closes.
+- Draft visibility on the diff. Lines with a buffered draft show a
+  `✱` glyph in the line-number gutter on the matching side, and the
+  header row shows a `💬 N` count whenever the host is in review
+  mode.
+- Three-way semantic anchor coloring in the gutter ribbon. Pure
+  delete segments now draw red dots on both panes (including the
+  phantom row on the right pane), pure inserts draw green on both,
+  and paired modifications draw yellow. New theme fields:
+  `modify_anchor_bright` / `modify_anchor_dim`.
+- `[` / `]` snap-step keybinds. They nudge the alignment indicator
+  one row up or down on screen and resnap the non-anchor pane —
+  distinct from j/k (which scrolls). Useful for fine-tuning the
+  snap after a click.
+- Review-mode help section. The `?` overlay now lists the
+  comment / submit / drafts / verdict keys (and `[` / `]`) when the
+  host is in `--review` mode.
+
+### Changed
+
+- Files panel ignores mouse wheel events. Wheel scrolling on long
+  file lists felt sluggish and made it too easy to lose your place;
+  click and j/k are the only ways to move the selection now.
+- Comment modal no longer paints two nested frames with the same
+  caption — the textarea's inner block is borderless.
+
+### Fixed
+
+- `--review <PR>` no longer fails with `Unknown JSON field:
+  "baseRefOid"` on gh 2.x. The provider now requests only fields the
+  CLI actually exposes; the host fetches the base branch from
+  `origin` and resolves `base_sha` via `git merge-base`, matching
+  GitHub's "Files changed" semantics.
+- `--review` no longer hangs silently when `git fetch` or
+  `git worktree add` need to prompt (SSH passphrase, credential
+  helper, host-key confirmation). The network-touching git
+  invocations inherit stdio so prompts and progress reach the
+  terminal.
+- `[` / `]` now actually move the alignment row instead of scrolling
+  the anchor pane in lockstep with the other side.
+
 ## [v0.1.1] - 2026-05-09
 
 ### Fixed
