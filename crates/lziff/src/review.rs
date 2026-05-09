@@ -58,8 +58,18 @@ pub fn open(spec: &str) -> Result<OpenedReview> {
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let workdir = PathBuf::from(&handle.path);
-    // Build a GitSource::range against the worktree root (or cwd, when
-    // we're reusing the existing checkout).
+    // `gh pr view --json` doesn't expose the base SHA, so the provider
+    // leaves it blank and we resolve it here against the worktree (or the
+    // cwd repo, if we're reusing an existing checkout). We fetch the base
+    // branch from origin and take the merge-base with the PR head — that
+    // matches GitHub's "Files changed" semantics rather than the raw tip
+    // of the base branch (which would include unrelated upstream commits
+    // landed after the PR diverged).
+    let mut pr = pr;
+    if pr.base_sha.is_empty() {
+        pr.base_sha = resolve_base_sha(&workdir, &pr.base, &pr.head_sha)
+            .with_context(|| format!("resolve base sha for {}", pr.base))?;
+    }
     let source = GitSource::range(&workdir, &pr.base_sha, &pr.head_sha)?;
 
     let guard = WorktreeGuard {
@@ -102,6 +112,52 @@ impl Drop for WorktreeGuard {
             let _ = std::fs::remove_dir_all(&p);
         }
     }
+}
+
+/// Fetch `base_ref` from origin and return the merge-base with `head_sha`.
+/// Falls back to the tip of the fetched ref if `merge-base` fails (e.g. the
+/// PR head and base have no common ancestor — rare, but possible for force-
+/// pushed branches).
+fn resolve_base_sha(workdir: &std::path::Path, base_ref: &str, head_sha: &str) -> Result<String> {
+    // Best-effort fetch; if origin already has the ref this is a fast no-op,
+    // and if the fetch fails (e.g. offline) we still try to resolve from
+    // whatever's already in the local refs.
+    let _ = Command::new("git")
+        .current_dir(workdir)
+        .args(["fetch", "--no-tags", "origin", base_ref])
+        .output();
+    // Try merge-base FETCH_HEAD..head_sha; if FETCH_HEAD isn't set (no
+    // fetch), fall back to origin/<base_ref>.
+    for base_spec in ["FETCH_HEAD", &format!("origin/{base_ref}"), base_ref] {
+        let out = Command::new("git")
+            .current_dir(workdir)
+            .args(["merge-base", base_spec, head_sha])
+            .output();
+        if let Ok(out) = out {
+            if out.status.success() {
+                let sha = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !sha.is_empty() {
+                    return Ok(sha);
+                }
+            }
+        }
+    }
+    // Last resort: just resolve the base ref to its tip.
+    for base_spec in ["FETCH_HEAD", &format!("origin/{base_ref}"), base_ref] {
+        let out = Command::new("git")
+            .current_dir(workdir)
+            .args(["rev-parse", base_spec])
+            .output();
+        if let Ok(out) = out {
+            if out.status.success() {
+                let sha = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !sha.is_empty() {
+                    return Ok(sha);
+                }
+            }
+        }
+    }
+    anyhow::bail!("could not resolve base ref `{base_ref}` to a sha")
 }
 
 fn parse_spec(spec: &str) -> PrRef {

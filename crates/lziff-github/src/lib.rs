@@ -85,7 +85,12 @@ impl ReviewProvider for GithubProvider {
             PrRef::Branch(b) => b.clone(),
             PrRef::Url(u) => u.clone(),
         };
-        let fields = "number,title,body,author,headRefName,baseRefName,headRefOid,baseRefOid,state,url,headRepository,baseRepository";
+        // Note: gh's `pr view --json` does NOT currently expose `baseRefOid`
+        // or `baseRepository` (verified against gh 2.x — the field list its
+        // error message prints out includes neither). We resolve the base
+        // SHA ourselves after fetching the base branch in the host, and we
+        // derive owner/name from the URL when needed.
+        let fields = "number,title,body,author,headRefName,baseRefName,headRefOid,state,url";
         let raw = run_gh(&["pr", "view", &arg, "--json", fields])?;
         let parsed: RawPrFull = serde_json::from_slice(&raw)
             .map_err(|e| ReviewError::Backend(format!("parse gh pr view: {e}")))?;
@@ -298,20 +303,6 @@ struct RawAuthor {
     login: String,
 }
 
-#[derive(Deserialize, Default)]
-struct RawRepoOwner {
-    #[serde(default)]
-    login: String,
-}
-
-#[derive(Deserialize, Default)]
-struct RawRepo {
-    #[serde(default)]
-    name: String,
-    #[serde(default)]
-    owner: RawRepoOwner,
-}
-
 #[derive(Deserialize)]
 struct RawPrSummary {
     number: u64,
@@ -356,36 +347,20 @@ struct RawPrFull {
     base_ref_name: String,
     #[serde(rename = "headRefOid", default)]
     head_ref_oid: String,
-    #[serde(rename = "baseRefOid", default)]
-    base_ref_oid: String,
     #[serde(default)]
     state: String,
     #[serde(default)]
     url: String,
-    // headRepository is asked for so the JSON shape is symmetric with
-    // baseRepository; we don't currently consume it because the URL
-    // already gives us enough to disambiguate forks.
-    #[serde(rename = "headRepository", default)]
-    _head_repo: RawRepo,
-    #[serde(rename = "baseRepository", default)]
-    base_repo: RawRepo,
 }
 
 impl RawPrFull {
     fn into_protocol(self) -> PullRequest {
-        // Prefer base repository (the PR's home repo) for owner/name.
-        // gh sometimes returns blanks for forks; fall back to URL parse.
-        let mut owner = self.base_repo.owner.login.clone();
-        let mut name = self.base_repo.name.clone();
-        if owner.is_empty() || name.is_empty() {
-            if let Some((o, n)) = parse_owner_name_from_url(&self.url) {
-                if owner.is_empty() {
-                    owner = o;
-                }
-                if name.is_empty() {
-                    name = n;
-                }
-            }
+        // owner/name come from the URL — `gh pr view --json` doesn't
+        // currently expose `baseRepository`, so we parse them ourselves.
+        let (mut owner, mut name) = (String::new(), String::new());
+        if let Some((o, n)) = parse_owner_name_from_url(&self.url) {
+            owner = o;
+            name = n;
         }
         PullRequest {
             number: self.number,
@@ -395,7 +370,9 @@ impl RawPrFull {
             branch: self.head_ref_name,
             base: self.base_ref_name,
             head_sha: self.head_ref_oid,
-            base_sha: self.base_ref_oid,
+            // Resolved by the host (lziff::review) after the base branch
+            // has been fetched into the worktree.
+            base_sha: String::new(),
             state: parse_state(&self.state),
             url: self.url,
             repo_owner: owner,
@@ -403,6 +380,7 @@ impl RawPrFull {
         }
     }
 }
+
 
 fn parse_state(s: &str) -> PrState {
     match s.to_ascii_uppercase().as_str() {
