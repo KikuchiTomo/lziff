@@ -136,6 +136,11 @@ pub struct Theme {
     pub diff_dim: Color,
     pub list_focus_bg: Color,
     pub list_dim_bg: Color,
+    pub help_section_fg: Color,
+    pub help_keys_fg: Color,
+    pub help_desc_fg: Color,
+    pub help_border_fg: Color,
+    pub help_panel_bg: Color,
 }
 
 impl Theme {
@@ -175,6 +180,11 @@ impl Theme {
             diff_dim: Color::DarkGray,
             list_focus_bg: Color::Rgb(50, 70, 100),
             list_dim_bg: Color::Rgb(50, 50, 50),
+            help_section_fg: Color::Rgb(225, 200, 130),
+            help_keys_fg: Color::Rgb(170, 210, 245),
+            help_desc_fg: Color::Rgb(210, 215, 220),
+            help_border_fg: Color::Rgb(120, 160, 220),
+            help_panel_bg: Color::Rgb(20, 24, 32),
         }
     }
 }
@@ -363,6 +373,11 @@ raw_color_struct!(RawTheme {
     diff_dim,
     list_focus_bg,
     list_dim_bg,
+    help_section_fg,
+    help_keys_fg,
+    help_desc_fg,
+    help_border_fg,
+    help_panel_bg,
 });
 
 #[derive(Debug, Default, Deserialize)]

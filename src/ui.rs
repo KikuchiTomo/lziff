@@ -757,36 +757,107 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
 
 fn render_help(f: &mut Frame, area: Rect, app: &App) {
     let theme = &app.config.theme;
-    // Sized to the longest help line + padding, with a sensible cap.
-    let body_w = app
-        .strings
-        .help_lines
+    let sections = &app.strings.help_sections;
+    if sections.is_empty() {
+        return;
+    }
+
+    // Right-align the keys column to the longest `keys` string across all
+    // sections so descriptions line up. Two spaces of gutter on each side
+    // plus 4 spaces between keys and desc.
+    let keys_w = sections
         .iter()
-        .map(|s| s.chars().count())
+        .flat_map(|s| s.entries.iter().map(|e| e.keys.chars().count()))
         .max()
-        .unwrap_or(40)
-        + 4;
-    let w = (body_w as u16).clamp(40, 80).min(area.width.saturating_sub(4));
-    let body_h = app.strings.help_lines.len() as u16 + 4;
-    let h = body_h.min(area.height.saturating_sub(4));
+        .unwrap_or(8);
+    let desc_w = sections
+        .iter()
+        .flat_map(|s| s.entries.iter().map(|e| e.desc.chars().count()))
+        .max()
+        .unwrap_or(20);
+    let title_w = sections
+        .iter()
+        .map(|s| s.title.chars().count())
+        .max()
+        .unwrap_or(0);
+
+    // Body width = max(title, keys + 4 + desc) + horizontal padding (4).
+    let entry_w = keys_w + 4 + desc_w;
+    let body_w = entry_w.max(title_w) + 4;
+    let w = (body_w as u16)
+        .clamp(36, 96)
+        .min(area.width.saturating_sub(4));
+
+    // Body height: one line per entry, blank line between sections, plus
+    // a section header row each, plus a top blank row. Outer +2 for the
+    // bordered block.
+    let mut body_h = 1usize; // top padding
+    for (i, s) in sections.iter().enumerate() {
+        if i > 0 {
+            body_h += 1; // separator blank line
+        }
+        body_h += 1; // section title
+        body_h += s.entries.len();
+    }
+    body_h += 1; // bottom padding
+    let h = (body_h as u16 + 2).min(area.height.saturating_sub(4));
+
     let x = area.x + (area.width - w) / 2;
     let y = area.y + (area.height - h) / 2;
     let r = Rect::new(x, y, w, h);
     f.render_widget(Clear, r);
-    let mut lines: Vec<Line> = Vec::with_capacity(2 + app.strings.help_lines.len());
-    lines.push(Line::from(Span::styled(
-        app.strings.help_header.clone(),
-        Style::default().add_modifier(Modifier::BOLD),
-    )));
+
+    let bg = theme.help_panel_bg;
+    let mut lines: Vec<Line> = Vec::with_capacity(body_h);
     lines.push(Line::raw(""));
-    for s in &app.strings.help_lines {
-        lines.push(Line::raw(s.clone()));
+    for (i, sec) in sections.iter().enumerate() {
+        if i > 0 {
+            lines.push(Line::from(Span::styled("", Style::default().bg(bg))));
+        }
+        lines.push(Line::from(vec![
+            Span::styled("  ", Style::default().bg(bg)),
+            Span::styled(
+                sec.title.clone(),
+                Style::default()
+                    .fg(theme.help_section_fg)
+                    .bg(bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        for entry in &sec.entries {
+            let pad = keys_w.saturating_sub(entry.keys.chars().count());
+            let pad_str = " ".repeat(pad);
+            lines.push(Line::from(vec![
+                Span::styled("    ", Style::default().bg(bg)),
+                Span::styled(pad_str, Style::default().bg(bg)),
+                Span::styled(
+                    entry.keys.clone(),
+                    Style::default()
+                        .fg(theme.help_keys_fg)
+                        .bg(bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("    ", Style::default().bg(bg)),
+                Span::styled(
+                    entry.desc.clone(),
+                    Style::default().fg(theme.help_desc_fg).bg(bg),
+                ),
+            ]));
+        }
     }
-    let p = Paragraph::new(lines).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(app.strings.title_help.clone())
-            .border_style(Style::default().fg(theme.diff_focus)),
-    );
+    lines.push(Line::raw(""));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(app.strings.title_help.clone())
+        .style(Style::default().bg(bg))
+        .title_style(
+            Style::default()
+                .fg(theme.help_section_fg)
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        )
+        .border_style(Style::default().fg(theme.help_border_fg).bg(bg));
+    let p = Paragraph::new(lines).block(block);
     f.render_widget(p, r);
 }

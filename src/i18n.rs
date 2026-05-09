@@ -1,8 +1,21 @@
 //! User-facing strings, separated from the rendering code so we can swap
 //! languages and (later) load them from external files.
 //!
-//! The struct fields are owned `String`s rather than `&'static str` so that
-//! plugin/config layers can override individual messages without rebuilding.
+//! Help is structured rather than a flat list of lines — the renderer can
+//! lay out sections, key columns, and descriptions independently and the
+//! translator never has to fight with whitespace alignment in a string.
+
+#[derive(Debug, Clone)]
+pub struct HelpEntry {
+    pub keys: String,
+    pub desc: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct HelpSection {
+    pub title: String,
+    pub entries: Vec<HelpEntry>,
+}
 
 #[derive(Debug, Clone)]
 pub struct Strings {
@@ -20,8 +33,7 @@ pub struct Strings {
     pub status_auto_reloaded: String,
     pub status_hint_default: String,
     pub status_hint_help_open: String,
-    pub help_header: String,
-    pub help_lines: Vec<String>,
+    pub help_sections: Vec<HelpSection>,
 }
 
 impl Strings {
@@ -45,20 +57,40 @@ impl Strings {
                 "j/k scroll  J/K hunk  click select+snap  =  resync  n/p file  Tab focus  ? help  q quit"
                     .into(),
             status_hint_help_open: "press ? to close help".into(),
-            help_header: "  Keys".into(),
-            help_lines: vec![
-                "  j / k       scroll both panes 1:1".into(),
-                "  J / K       jump to next / prev change hunk".into(),
-                "  ctrl-d/u    half-page down / up".into(),
-                "  =           re-snap non-anchor pane to alignment row".into(),
-                "  click       select that line; the *other* pane snaps".into(),
-                "  wheel       scroll pane under pointer".into(),
-                "  n / p       next / prev file".into(),
-                "  Tab         toggle focus (Files / Diff)".into(),
-                "  F           show / hide the files panel".into(),
-                "  r           manual reload".into(),
-                "  ? / esc     toggle / close this help".into(),
-                "  q          quit".into(),
+            help_sections: vec![
+                HelpSection {
+                    title: "Navigation".into(),
+                    entries: vec![
+                        e("j / k", "scroll both panes 1:1"),
+                        e("J / K", "jump to next / prev change hunk"),
+                        e("ctrl-d / ctrl-u", "half-page down / up"),
+                        e("g / G", "top / bottom"),
+                        e("n / p", "next / prev file"),
+                    ],
+                },
+                HelpSection {
+                    title: "Alignment".into(),
+                    entries: vec![
+                        e("click", "select that line; the *other* pane snaps"),
+                        e("wheel", "scroll pane under pointer"),
+                        e("=", "re-snap non-anchor pane to alignment row"),
+                    ],
+                },
+                HelpSection {
+                    title: "Display".into(),
+                    entries: vec![
+                        e("Tab", "toggle focus (Files / Diff)"),
+                        e("F", "show / hide the files panel"),
+                        e("r", "manual reload"),
+                    ],
+                },
+                HelpSection {
+                    title: "App".into(),
+                    entries: vec![
+                        e("? / Esc", "toggle / close this help"),
+                        e("q", "quit"),
+                    ],
+                },
             ],
         }
     }
@@ -76,21 +108,48 @@ impl Strings {
                 "j/k スクロール  J/K ハンク  クリック選択  =  再同期  n/p ファイル  Tab フォーカス  ? ヘルプ  q 終了"
                     .into(),
             status_hint_help_open: "? でヘルプを閉じる".into(),
-            help_header: "  キー".into(),
-            help_lines: vec![
-                "  j / k       両ペインを 1:1 でスクロール".into(),
-                "  J / K       次 / 前の変更ブロックへ".into(),
-                "  ctrl-d/u    半ページ 上 / 下".into(),
-                "  =           非アンカー側を整列行に再同期".into(),
-                "  click       その行を選択、反対ペインがスナップ".into(),
-                "  wheel       ポインタ下のペインをスクロール".into(),
-                "  n / p       次 / 前のファイル".into(),
-                "  Tab         フォーカス切替 (ファイル / Diff)".into(),
-                "  F           ファイルパネルの表示切替".into(),
-                "  r           手動再読込".into(),
-                "  ? / esc     ヘルプの開閉".into(),
-                "  q          終了".into(),
+            help_sections: vec![
+                HelpSection {
+                    title: "ナビゲーション".into(),
+                    entries: vec![
+                        e("j / k", "両ペインを 1:1 でスクロール"),
+                        e("J / K", "次 / 前の変更ブロックへ"),
+                        e("ctrl-d / ctrl-u", "半ページ 上 / 下"),
+                        e("g / G", "先頭 / 末尾"),
+                        e("n / p", "次 / 前のファイル"),
+                    ],
+                },
+                HelpSection {
+                    title: "整列".into(),
+                    entries: vec![
+                        e("click", "その行を選択 — 反対ペインがスナップ"),
+                        e("wheel", "ポインタ下のペインをスクロール"),
+                        e("=", "非アンカー側を整列行に再同期"),
+                    ],
+                },
+                HelpSection {
+                    title: "表示".into(),
+                    entries: vec![
+                        e("Tab", "フォーカス切替 (ファイル / Diff)"),
+                        e("F", "ファイルパネルの表示切替"),
+                        e("r", "手動再読込"),
+                    ],
+                },
+                HelpSection {
+                    title: "アプリ".into(),
+                    entries: vec![
+                        e("? / Esc", "ヘルプの開閉"),
+                        e("q", "終了"),
+                    ],
+                },
             ],
         }
+    }
+}
+
+fn e(keys: &str, desc: &str) -> HelpEntry {
+    HelpEntry {
+        keys: keys.into(),
+        desc: desc.into(),
     }
 }
