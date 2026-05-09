@@ -52,13 +52,11 @@ pub struct CommentModal {
 
 impl CommentModal {
     pub fn new(path: String, line: u32, side: CommentSide) -> Self {
+        // The modal's outer block already shows " Comment · <path>:<line> "
+        // as its title — give the textarea a borderless block so we don't
+        // end up with two nested frames carrying the same caption.
         let mut textarea = TextArea::default();
         textarea.set_cursor_line_style(ratatui::style::Style::default());
-        textarea.set_block(
-            ratatui::widgets::Block::default()
-                .borders(ratatui::widgets::Borders::ALL)
-                .title(format!(" Comment on {} : {} ", path, line)),
-        );
         Self {
             path,
             line,
