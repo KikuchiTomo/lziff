@@ -42,6 +42,10 @@ pub enum Action {
     OpenComment,
     /// Open the submit-review modal (verdict + body + drafts).
     OpenSubmit,
+    /// Step the click-set snap anchor by one render row in the anchored
+    /// pane and resnap the other side. Distinct from j/k (which scrolls).
+    SnapUp,
+    SnapDown,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -98,6 +102,8 @@ impl Keymap {
                 b("c", Action::OpenComment),
                 b("S", Action::OpenSubmit),
                 b("Enter", Action::EnterDiff),
+                b("[", Action::SnapUp),
+                b("]", Action::SnapDown),
                 b("h", Action::FocusFiles),
                 b("Left", Action::FocusFiles),
                 b("l", Action::FocusDiff),
@@ -128,6 +134,11 @@ pub struct Theme {
     pub change_anchor_dim_left: Color,
     pub change_anchor_bright_right: Color,
     pub change_anchor_dim_right: Color,
+    /// Anchor color for paired modifications (both sides have content).
+    /// Red/green already say "deleted" / "inserted" — yellow is the third
+    /// signal for "the line moved on both sides".
+    pub modify_anchor_bright: Color,
+    pub modify_anchor_dim: Color,
     pub line_bright: Color,
     pub line_dim: Color,
     pub change_line_bright: Color,
@@ -173,6 +184,8 @@ impl Theme {
             change_anchor_dim_left: Color::Rgb(170, 80, 90),
             change_anchor_bright_right: Color::Rgb(120, 210, 140),
             change_anchor_dim_right: Color::Rgb(80, 160, 100),
+            modify_anchor_bright: Color::Rgb(230, 200, 110),
+            modify_anchor_dim: Color::Rgb(170, 145, 70),
             line_bright: Color::Rgb(245, 245, 250),
             line_dim: Color::Rgb(190, 195, 210),
             change_line_bright: Color::Rgb(190, 170, 120),
@@ -367,6 +380,8 @@ raw_color_struct!(RawTheme {
     change_anchor_dim_left,
     change_anchor_bright_right,
     change_anchor_dim_right,
+    modify_anchor_bright,
+    modify_anchor_dim,
     line_bright,
     line_dim,
     change_line_bright,
@@ -529,6 +544,8 @@ fn parse_action(s: &str) -> Option<Action> {
         "enter_diff" => Action::EnterDiff,
         "open_comment" => Action::OpenComment,
         "open_submit" => Action::OpenSubmit,
+        "snap_up" => Action::SnapUp,
+        "snap_down" => Action::SnapDown,
         _ => return None,
     })
 }

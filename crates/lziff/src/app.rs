@@ -277,6 +277,55 @@ impl App {
         (l_stays, r_stays)
     }
 
+    /// Move the click-set snap anchor by one render row in the anchored
+    /// pane and resnap the other side to match. This is *not* the same as
+    /// j/k (which scrolls both panes); `[`/`]` re-binds the alignment to a
+    /// neighbouring line on the anchored side without changing where on
+    /// screen the alignment row sits, so the user can fine-tune the snap
+    /// after a click.
+    pub fn snap_step(&mut self, forward: bool) {
+        match self.anchor_side {
+            AnchorSide::Left => {
+                let cur = self.left_top + self.cursor_y;
+                let new_l = if forward {
+                    if cur + 1 >= self.diff.left_render.len() {
+                        return;
+                    }
+                    cur + 1
+                } else {
+                    if cur == 0 {
+                        return;
+                    }
+                    cur - 1
+                };
+                let r = self.diff.corresponding_right_for_left(new_l);
+                let cy = self.cursor_y.min(r);
+                self.cursor_y = cy;
+                self.left_top = new_l.saturating_sub(cy);
+                self.right_top = r.saturating_sub(cy);
+            }
+            AnchorSide::Right => {
+                let cur = self.right_top + self.cursor_y;
+                let new_r = if forward {
+                    if cur + 1 >= self.diff.right_render.len() {
+                        return;
+                    }
+                    cur + 1
+                } else {
+                    if cur == 0 {
+                        return;
+                    }
+                    cur - 1
+                };
+                let l = self.diff.corresponding_left_for_right(new_r);
+                let cy = self.cursor_y.min(l);
+                self.cursor_y = cy;
+                self.right_top = new_r.saturating_sub(cy);
+                self.left_top = l.saturating_sub(cy);
+            }
+        }
+    }
+
     /// Snap the non-anchor pane to whatever the anchor pane currently shows
     /// at the cursor row. Used by "=" to re-align after the panes drift.
     pub fn resnap(&mut self) {
@@ -470,15 +519,10 @@ impl App {
 
     pub fn handle_scroll(&mut self, x: u16, y: u16, down: bool) {
         let step = self.config.behavior.scroll_step;
-        if rect_contains(self.layout.files_inner, x, y) {
-            for _ in 0..step {
-                if down {
-                    self.select_next();
-                } else {
-                    self.select_prev();
-                }
-            }
-        } else if rect_contains(self.layout.diff_left_inner, x, y)
+        // Files panel deliberately ignores wheel events: scrolling there
+        // felt sluggish on long file lists and made it too easy to lose
+        // your place. j/k or click are the way to move the selection.
+        if rect_contains(self.layout.diff_left_inner, x, y)
             || rect_contains(self.layout.diff_right_inner, x, y)
         {
             if down {

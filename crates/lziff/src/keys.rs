@@ -81,6 +81,8 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Action {
                 app.open_submit();
             }
         }
+        ConfigAction::SnapUp => app.snap_step(false),
+        ConfigAction::SnapDown => app.snap_step(true),
     }
     Action::Continue
 }

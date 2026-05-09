@@ -1,6 +1,6 @@
 use crate::app::{AnchorSide, App, Focus, LayoutCache};
 use crate::config::Theme;
-use crate::diff::{LineKind, PaneLine, Segment, SegmentKind};
+use crate::diff::{AlignSegment, LineKind, PaneLine, Segment, SegmentKind};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -440,33 +440,66 @@ fn build_ribbon_grid(app: &App, viewport_h: usize, cursor_y: usize) -> Vec<Line<
         let l_glyph = if l_filled { '●' } else { '○' };
         let r_glyph = if r_filled { '●' } else { '○' };
 
-        let (l_dim, l_bright, r_dim, r_bright) = if seg.is_change {
-            (
+        // Color the anchors by *segment kind* so the gutter at-a-glance
+        // says delete (red on both sides), insert (green on both sides),
+        // or modify (yellow on both sides). Equal segments stay neutral.
+        let (l_dim, l_bright, r_dim, r_bright) = match classify_segment(seg) {
+            RibbonSegKind::Equal => (
+                theme.anchor_soft,
+                theme.anchor_bright,
+                theme.anchor_soft,
+                theme.anchor_bright,
+            ),
+            RibbonSegKind::Delete => (
                 theme.change_anchor_dim_left,
                 theme.change_anchor_bright_left,
+                theme.change_anchor_dim_left,
+                theme.change_anchor_bright_left,
+            ),
+            RibbonSegKind::Insert => (
                 theme.change_anchor_dim_right,
                 theme.change_anchor_bright_right,
-            )
-        } else {
-            (
-                theme.anchor_soft,
-                theme.anchor_bright,
-                theme.anchor_soft,
-                theme.anchor_bright,
-            )
+                theme.change_anchor_dim_right,
+                theme.change_anchor_bright_right,
+            ),
+            RibbonSegKind::Modify => (
+                theme.modify_anchor_dim,
+                theme.modify_anchor_bright,
+                theme.modify_anchor_dim,
+                theme.modify_anchor_bright,
+            ),
         };
         let l_color = if l_filled { l_bright } else { l_dim };
         let r_color = if r_filled { r_bright } else { r_dim };
-        let line_color = if seg.is_change {
-            if l_filled || r_filled {
-                theme.change_line_bright
-            } else {
-                theme.change_line_dim
+        let line_color = match classify_segment(seg) {
+            RibbonSegKind::Equal => {
+                if l_filled || r_filled {
+                    theme.line_bright
+                } else {
+                    theme.line_dim
+                }
             }
-        } else if l_filled || r_filled {
-            theme.line_bright
-        } else {
-            theme.line_dim
+            RibbonSegKind::Delete => {
+                if l_filled || r_filled {
+                    theme.change_anchor_bright_left
+                } else {
+                    theme.change_anchor_dim_left
+                }
+            }
+            RibbonSegKind::Insert => {
+                if l_filled || r_filled {
+                    theme.change_anchor_bright_right
+                } else {
+                    theme.change_anchor_dim_right
+                }
+            }
+            RibbonSegKind::Modify => {
+                if l_filled || r_filled {
+                    theme.change_line_bright
+                } else {
+                    theme.change_line_dim
+                }
+            }
         };
 
         // Anchors are *always* drawn — only the connector line gets hidden
@@ -574,6 +607,30 @@ fn overlay_alignment(base: Color, theme: &Theme) -> Color {
             b.saturating_add(40),
         ),
         c => c,
+    }
+}
+
+/// Three-way classification of a change segment for the gutter ribbon.
+/// `is_change` alone collapses delete/insert/modify into one bucket, but
+/// the user reads them very differently: red dot = something only on the
+/// left, green dot = something only on the right, yellow dot = paired
+/// modification. Equal segments stay neutral (white).
+#[derive(Debug, Clone, Copy)]
+enum RibbonSegKind {
+    Equal,
+    Delete,
+    Insert,
+    Modify,
+}
+
+fn classify_segment(seg: &AlignSegment) -> RibbonSegKind {
+    if !seg.is_change {
+        return RibbonSegKind::Equal;
+    }
+    match (seg.l_count, seg.r_count) {
+        (0, _) => RibbonSegKind::Insert,
+        (_, 0) => RibbonSegKind::Delete,
+        _ => RibbonSegKind::Modify,
     }
 }
 
