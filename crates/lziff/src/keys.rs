@@ -1,6 +1,9 @@
 use crate::app::{App, Focus};
 use crate::config::Action as ConfigAction;
-use crossterm::event::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
+use crate::review_session::{Modal, SubmitFocus};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
+use review_protocol::ReviewVerdict;
+use tui_textarea::{Input, Key};
 
 pub enum Action {
     Continue,
@@ -8,10 +11,15 @@ pub enum Action {
 }
 
 pub fn handle_key(app: &mut App, key: KeyEvent) -> Action {
+    // Modal capture comes first — when a comment / submit modal is open
+    // every keystroke (except escape and the explicit save shortcut)
+    // belongs to its text area.
+    if app.review.as_ref().and_then(|r| r.modal.as_ref()).is_some() {
+        return handle_modal_key(app, key);
+    }
+
     let mods = key.modifiers
-        & (crossterm::event::KeyModifiers::SHIFT
-            | crossterm::event::KeyModifiers::CONTROL
-            | crossterm::event::KeyModifiers::ALT);
+        & (KeyModifiers::SHIFT | KeyModifiers::CONTROL | KeyModifiers::ALT);
     let cfg_action = app.config.keymap.lookup(key.code, mods);
 
     if app.show_help {
@@ -25,7 +33,6 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Action {
     }
 
     let Some(action) = cfg_action else {
-        // Fall through: nothing bound; ignore.
         if matches!(key.code, KeyCode::Enter) && matches!(app.focus, Focus::Files) {
             app.focus = Focus::Diff;
         }
@@ -36,7 +43,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Action {
     match action {
         ConfigAction::Quit => return Action::Quit,
         ConfigAction::ToggleHelp => app.show_help = true,
-        ConfigAction::CloseHelp => {} // only meaningful while help is open
+        ConfigAction::CloseHelp => {}
         ConfigAction::ToggleFocus => app.toggle_focus(),
         ConfigAction::ToggleFilesPanel => app.toggle_files_panel(),
         ConfigAction::Reload => app.reload_entries(),
@@ -64,12 +71,135 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Action {
         }
         ConfigAction::FocusFiles => app.focus = Focus::Files,
         ConfigAction::FocusDiff => app.focus = Focus::Diff,
+        ConfigAction::OpenComment => {
+            if app.review.is_some() && matches!(app.focus, Focus::Diff) {
+                app.open_comment_at_cursor();
+            }
+        }
+        ConfigAction::OpenSubmit => {
+            if app.review.is_some() {
+                app.open_submit();
+            }
+        }
     }
     Action::Continue
 }
 
+fn handle_modal_key(app: &mut App, key: KeyEvent) -> Action {
+    let Some(review) = app.review.as_mut() else {
+        return Action::Continue;
+    };
+
+    // Esc always closes (cancels) the modal.
+    if matches!(key.code, KeyCode::Esc) {
+        review.close_modal();
+        return Action::Continue;
+    }
+
+    // Ctrl-S short-circuits: it acts on the *whole* session (saving a
+    // draft or submitting), so the modal borrow has to be released
+    // first via `review.modal.take()`-style helpers.
+    let is_ctrl_s =
+        key.code == KeyCode::Char('s') && key.modifiers.contains(KeyModifiers::CONTROL);
+    if is_ctrl_s {
+        match review.modal {
+            Some(Modal::Comment(_)) => review.save_comment_draft(),
+            Some(Modal::Submit(_)) => review.submit(),
+            None => {}
+        }
+        return Action::Continue;
+    }
+
+    // Otherwise route into the open modal.
+    let Some(modal) = review.modal.as_mut() else {
+        return Action::Continue;
+    };
+    match modal {
+        Modal::Comment(m) => {
+            m.textarea.input(crossterm_to_input(key));
+        }
+        Modal::Submit(m) => {
+            if matches!(key.code, KeyCode::Tab) {
+                m.focus = match m.focus {
+                    SubmitFocus::Verdict => SubmitFocus::Body,
+                    SubmitFocus::Body => SubmitFocus::Verdict,
+                };
+                return Action::Continue;
+            }
+            if m.focus == SubmitFocus::Verdict {
+                match key.code {
+                    KeyCode::Char('a') | KeyCode::Char('A') => {
+                        m.verdict = ReviewVerdict::Approve
+                    }
+                    KeyCode::Char('c') | KeyCode::Char('C') => {
+                        m.verdict = ReviewVerdict::Comment
+                    }
+                    KeyCode::Char('r') | KeyCode::Char('R') => {
+                        m.verdict = ReviewVerdict::RequestChanges
+                    }
+                    KeyCode::Left => m.verdict = prev_verdict(m.verdict),
+                    KeyCode::Right => m.verdict = next_verdict(m.verdict),
+                    _ => {}
+                }
+                return Action::Continue;
+            }
+            m.textarea.input(crossterm_to_input(key));
+        }
+    }
+    Action::Continue
+}
+
+fn prev_verdict(v: ReviewVerdict) -> ReviewVerdict {
+    match v {
+        ReviewVerdict::Comment => ReviewVerdict::RequestChanges,
+        ReviewVerdict::Approve => ReviewVerdict::Comment,
+        ReviewVerdict::RequestChanges => ReviewVerdict::Approve,
+    }
+}
+
+fn next_verdict(v: ReviewVerdict) -> ReviewVerdict {
+    match v {
+        ReviewVerdict::Comment => ReviewVerdict::Approve,
+        ReviewVerdict::Approve => ReviewVerdict::RequestChanges,
+        ReviewVerdict::RequestChanges => ReviewVerdict::Comment,
+    }
+}
+
+fn crossterm_to_input(key: KeyEvent) -> Input {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
+    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+    let k = match key.code {
+        KeyCode::Char(c) => Key::Char(c),
+        KeyCode::Backspace => Key::Backspace,
+        KeyCode::Enter => Key::Enter,
+        KeyCode::Left => Key::Left,
+        KeyCode::Right => Key::Right,
+        KeyCode::Up => Key::Up,
+        KeyCode::Down => Key::Down,
+        KeyCode::Home => Key::Home,
+        KeyCode::End => Key::End,
+        KeyCode::PageUp => Key::PageUp,
+        KeyCode::PageDown => Key::PageDown,
+        KeyCode::Tab => Key::Tab,
+        KeyCode::Delete => Key::Delete,
+        KeyCode::Esc => Key::Esc,
+        KeyCode::F(n) => Key::F(n),
+        _ => Key::Null,
+    };
+    Input {
+        key: k,
+        ctrl,
+        alt,
+        shift,
+    }
+}
+
 pub fn handle_mouse(app: &mut App, m: MouseEvent) {
     if app.show_help {
+        return;
+    }
+    if app.review.as_ref().and_then(|r| r.modal.as_ref()).is_some() {
         return;
     }
     match m.kind {

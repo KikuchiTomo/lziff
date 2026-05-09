@@ -4,6 +4,7 @@ mod diff;
 mod i18n;
 mod keys;
 mod review;
+mod review_session;
 mod source;
 mod ui;
 
@@ -84,7 +85,7 @@ fn main() -> Result<()> {
 
     let cfg = config::Config::load();
     let strings = i18n::Strings::for_lang(&cfg.i18n.lang);
-    let mut app = App::new(prep.source, cfg, strings)?;
+    let mut app = App::new_with_review(prep.source, cfg, strings, prep.review)?;
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -116,6 +117,8 @@ struct Prep {
     /// Held for the lifetime of the run; dropping it removes the worktree
     /// (only set in `--review` mode when we created one).
     cleanup: Option<review::WorktreeGuard>,
+    /// Active review session when `--review` was used.
+    review: Option<review_session::ReviewSession>,
 }
 
 fn prepare(cli: &Cli) -> Result<Prep> {
@@ -129,28 +132,32 @@ fn prepare(cli: &Cli) -> Result<Prep> {
                 right: cli.paths[1].clone(),
             }),
             cleanup: None,
+            review: None,
         });
     }
 
     let cwd = std::env::current_dir()?;
 
     if let Some(spec) = &cli.review {
-        let (source, guard) = review::open(spec)?;
+        let opened = review::open(spec)?;
         return Ok(Prep {
-            source,
-            cleanup: Some(guard),
+            source: opened.source,
+            cleanup: Some(opened.guard),
+            review: Some(opened.session),
         });
     }
     if cli.staged {
         return Ok(Prep {
             source: Box::new(GitSource::staged(&cwd)?),
             cleanup: None,
+            review: None,
         });
     }
     if let Some(rev) = &cli.commit {
         return Ok(Prep {
             source: Box::new(GitSource::commit(&cwd, rev)?),
             cleanup: None,
+            review: None,
         });
     }
     if let Some(range) = &cli.range {
@@ -163,11 +170,13 @@ fn prepare(cli: &Cli) -> Result<Prep> {
         return Ok(Prep {
             source: Box::new(GitSource::range(&cwd, from, to)?),
             cleanup: None,
+            review: None,
         });
     }
     Ok(Prep {
         source: Box::new(GitSource::working_tree(&cwd)?),
         cleanup: None,
+        review: None,
     })
 }
 

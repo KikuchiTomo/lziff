@@ -37,6 +37,11 @@ pub enum Action {
     FocusFiles,
     FocusDiff,
     EnterDiff,
+    /// Open the comment-input modal anchored at the cursor row.
+    /// No-op when the host wasn't started in `--review` mode.
+    OpenComment,
+    /// Open the submit-review modal (verdict + body + drafts).
+    OpenSubmit,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -90,6 +95,8 @@ impl Keymap {
                 b("ctrl-u", Action::HalfPageUp),
                 b("g", Action::Top),
                 b("G", Action::Bottom),
+                b("c", Action::OpenComment),
+                b("S", Action::OpenSubmit),
                 b("Enter", Action::EnterDiff),
                 b("h", Action::FocusFiles),
                 b("Left", Action::FocusFiles),
@@ -520,6 +527,8 @@ fn parse_action(s: &str) -> Option<Action> {
         "focus_files" => Action::FocusFiles,
         "focus_diff" => Action::FocusDiff,
         "enter_diff" => Action::EnterDiff,
+        "open_comment" => Action::OpenComment,
+        "open_submit" => Action::OpenSubmit,
         _ => return None,
     })
 }

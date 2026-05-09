@@ -18,19 +18,30 @@
 //! - Don't fan out: a future `make_gitlab_provider` lives next to
 //!   `make_github_provider`, both produce `Box<dyn ReviewProvider>`.
 
+use crate::review_session::ReviewSession;
 use crate::source::{DiffSource, GitSource};
 use anyhow::{Context, Result};
-use review_protocol::{PrRef, PullRequest, ReviewProvider};
+use review_protocol::{PrRef, ReviewProvider};
 use std::path::PathBuf;
 use std::process::Command;
 
-/// Resolve a `--review` spec into (source, cleanup-guard).
+/// What `prepare()` gets back when the user asked for `--review <spec>`.
+pub struct OpenedReview {
+    pub source: Box<dyn DiffSource>,
+    pub guard: WorktreeGuard,
+    pub session: ReviewSession,
+}
+
+/// Resolve a `--review` spec into the host-ready bundle: a diff source
+/// pointed at the PR's worktree, the cleanup guard for that worktree,
+/// and the review session that owns drafts/modal state and the
+/// provider used at submit time.
 ///
 /// The spec is whatever the user typed: `42`, `feature/x`, or a full
 /// PR URL. We pick the right backend (currently always GitHub), look
 /// up the PR, ensure a worktree, and hand the host a `GitSource::range`
 /// that diffs `base_sha..head_sha`.
-pub fn open(spec: &str) -> Result<(Box<dyn DiffSource>, WorktreeGuard)> {
+pub fn open(spec: &str) -> Result<OpenedReview> {
     // Pick the backend. Today there's only `github`; a future
     // GitLab/Gitea backend just adds a branch above this.
     let provider = make_provider("github").context("no review backend available")?;
@@ -57,11 +68,16 @@ pub fn open(spec: &str) -> Result<(Box<dyn DiffSource>, WorktreeGuard)> {
         } else {
             None
         },
-        // Stash the PR so the host can later show it in the title bar /
-        // status bar; reserved for a follow-up commit.
-        _pr: pr,
     };
-    Ok((Box::new(source), guard))
+    // The session keeps its own provider handle so submitting from the
+    // TUI doesn't need to thread anything back through main.rs.
+    let session_provider = make_provider("github").expect("backend already validated above");
+    let session = ReviewSession::new(pr, session_provider);
+    Ok(OpenedReview {
+        source: Box::new(source),
+        guard,
+        session,
+    })
 }
 
 /// Owns the temporary worktree lifetime. Dropping it removes the
@@ -70,7 +86,6 @@ pub fn open(spec: &str) -> Result<(Box<dyn DiffSource>, WorktreeGuard)> {
 /// branch), `path` is `None` and Drop is a no-op.
 pub struct WorktreeGuard {
     path: Option<PathBuf>,
-    _pr: PullRequest,
 }
 
 impl Drop for WorktreeGuard {

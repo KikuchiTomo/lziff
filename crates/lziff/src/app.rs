@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::diff::{Diff, LineKind};
 use crate::i18n::Strings;
+use crate::review_session::ReviewSession;
 use crate::source::{DiffPayload, DiffSource, Entry};
 use anyhow::Result;
 use ratatui::layout::Rect;
@@ -50,11 +51,19 @@ pub struct App {
     pub show_files_panel: bool,
     pub config: Config,
     pub strings: Strings,
+    /// Active review session when the host was started with `--review`.
+    /// Owns the buffered draft comments and the active modal, if any.
+    pub review: Option<ReviewSession>,
     last_signature: u64,
 }
 
 impl App {
-    pub fn new(source: Box<dyn DiffSource>, config: Config, strings: Strings) -> Result<Self> {
+    pub fn new_with_review(
+        source: Box<dyn DiffSource>,
+        config: Config,
+        strings: Strings,
+        review: Option<ReviewSession>,
+    ) -> Result<Self> {
         let entries = source.list()?;
         let signature = source.signature(entries.first().map(|e| e.id.as_str()));
         let show_files = source.show_files_panel();
@@ -75,6 +84,7 @@ impl App {
             show_files_panel: show_files,
             config,
             strings,
+            review,
             last_signature: signature,
         };
         app.reload_diff();
@@ -411,6 +421,50 @@ impl App {
             self.right_top = r_idx.saturating_sub(cy);
             self.left_top = l.saturating_sub(cy);
             self.focus = Focus::Diff;
+        }
+    }
+
+    /// Open the comment modal for the cursor row's currently-anchored
+    /// pane. Path comes from the active diff payload; line number and
+    /// side come from the alignment row.
+    pub fn open_comment_at_cursor(&mut self) {
+        let Some(review) = self.review.as_mut() else {
+            return;
+        };
+        // Determine line and side from the current cursor position.
+        let (line, side) = match self.anchor_side {
+            AnchorSide::Left => {
+                let l_render_idx = self.left_top + self.cursor_y;
+                let Some(Some(line_idx)) = self.diff.left_render.get(l_render_idx) else {
+                    return;
+                };
+                let Some(line) = self.diff.left.get(*line_idx) else {
+                    return;
+                };
+                (line.line_no as u32, review_protocol::CommentSide::Old)
+            }
+            AnchorSide::Right => {
+                let r_render_idx = self.right_top + self.cursor_y;
+                let Some(Some(line_idx)) = self.diff.right_render.get(r_render_idx) else {
+                    return;
+                };
+                let Some(line) = self.diff.right.get(*line_idx) else {
+                    return;
+                };
+                (line.line_no as u32, review_protocol::CommentSide::New)
+            }
+        };
+        // Path is the currently-selected entry's id (= file path on
+        // either side; for git it's the same on both).
+        let Some(entry) = self.entries.get(self.selected) else {
+            return;
+        };
+        review.open_comment(entry.id.clone(), line, side);
+    }
+
+    pub fn open_submit(&mut self) {
+        if let Some(review) = self.review.as_mut() {
+            review.open_submit();
         }
     }
 

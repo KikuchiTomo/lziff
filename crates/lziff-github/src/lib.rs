@@ -22,10 +22,10 @@
 //!   plugin once we hit a perf/feature wall.
 
 use review_protocol::{
-    ListQuery, PrRef, PrState, PrSummary, ProviderResult, PullRequest, ReviewComment,
-    ReviewError, ReviewProvider, WorktreeHandle,
+    CommentSide, ListQuery, NewComment, PrRef, PrState, PrSummary, ProviderResult, PullRequest,
+    ReviewComment, ReviewError, ReviewProvider, ReviewVerdict, WorktreeHandle,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::process::Command;
 
@@ -152,6 +152,89 @@ impl ReviewProvider for GithubProvider {
         //   `gh api repos/{owner}/{repo}/issues/{n}/comments`  (PR-level)
         // Skipping for the first cut — the diff UX works without comments.
         Ok(Vec::new())
+    }
+
+    fn submit_review(
+        &self,
+        pr: &PullRequest,
+        body: &str,
+        verdict: ReviewVerdict,
+        comments: Vec<NewComment>,
+    ) -> ProviderResult<()> {
+        if pr.repo_owner.is_empty() || pr.repo_name.is_empty() {
+            return Err(ReviewError::Backend(
+                "PR is missing repo owner/name (cannot submit)".into(),
+            ));
+        }
+        // Build the JSON body matching GitHub's
+        //   POST /repos/{owner}/{repo}/pulls/{n}/reviews
+        let payload = ReviewPayload {
+            commit_id: pr.head_sha.clone(),
+            body: body.to_string(),
+            event: match verdict {
+                ReviewVerdict::Comment => "COMMENT",
+                ReviewVerdict::Approve => "APPROVE",
+                ReviewVerdict::RequestChanges => "REQUEST_CHANGES",
+            }
+            .to_string(),
+            comments: comments.into_iter().map(NewCommentJson::from).collect(),
+        };
+        let body_json = serde_json::to_string(&payload)
+            .map_err(|e| ReviewError::Backend(format!("encode review body: {e}")))?;
+        let endpoint =
+            format!("repos/{}/{}/pulls/{}/reviews", pr.repo_owner, pr.repo_name, pr.number);
+        // `gh api -X POST <endpoint> --input -` reads JSON from stdin.
+        let mut child = Command::new("gh")
+            .args(["api", "-X", "POST", &endpoint, "--input", "-"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| ReviewError::Backend(format!("spawn gh: {e}")))?;
+        if let Some(stdin) = child.stdin.as_mut() {
+            use std::io::Write;
+            stdin
+                .write_all(body_json.as_bytes())
+                .map_err(|e| ReviewError::Backend(format!("write gh stdin: {e}")))?;
+        }
+        let out = child
+            .wait_with_output()
+            .map_err(|e| ReviewError::Backend(format!("wait gh: {e}")))?;
+        if !out.status.success() {
+            let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            return Err(classify_gh_error(&msg));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Serialize)]
+struct ReviewPayload {
+    commit_id: String,
+    body: String,
+    event: String,
+    comments: Vec<NewCommentJson>,
+}
+
+#[derive(Serialize)]
+struct NewCommentJson {
+    path: String,
+    line: u32,
+    side: &'static str,
+    body: String,
+}
+
+impl From<NewComment> for NewCommentJson {
+    fn from(c: NewComment) -> Self {
+        Self {
+            path: c.path,
+            line: c.line,
+            side: match c.side {
+                CommentSide::Old => "LEFT",
+                CommentSide::New => "RIGHT",
+            },
+            body: c.body,
+        }
     }
 }
 

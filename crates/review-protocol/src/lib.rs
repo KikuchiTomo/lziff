@@ -116,6 +116,39 @@ pub struct WorktreeHandle {
     pub cleanup_on_drop: bool,
 }
 
+/// Verdict the reviewer is leaving on the whole PR. Maps directly onto
+/// GitHub's review-event values (`COMMENT`, `APPROVE`,
+/// `REQUEST_CHANGES`). Backends that don't model verdicts can ignore
+/// the field and just attach the comments.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewVerdict {
+    Comment,
+    Approve,
+    RequestChanges,
+}
+
+/// Side a line comment is anchored to. `Old` is the LEFT pane (base
+/// version); `New` is the RIGHT pane (head version). Mirrors GitHub's
+/// `LEFT`/`RIGHT` query parameter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommentSide {
+    Old,
+    New,
+}
+
+/// A draft line comment ready to be submitted. The host buffers these
+/// during a review session and ships them as a single batched call.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewComment {
+    pub path: String,
+    /// 1-based source line number on the indicated `side`.
+    pub line: u32,
+    pub side: CommentSide,
+    pub body: String,
+}
+
 /// A single review comment (PR-level or line-level). Optional fields
 /// allow backends that don't carry the data to omit it; the renderer
 /// degrades gracefully.
@@ -205,6 +238,22 @@ pub trait ReviewProvider: Send + Sync {
     /// satisfies the trait.
     fn list_review_comments(&self, _pr: &PullRequest) -> ProviderResult<Vec<ReviewComment>> {
         Ok(Vec::new())
+    }
+
+    /// Send a review (verdict + optional overall body + zero or more
+    /// line comments) as a single batched call. Backends that don't
+    /// support verdicts may ignore them but should still post the
+    /// comments. Default impl errors with `Unsupported`.
+    fn submit_review(
+        &self,
+        _pr: &PullRequest,
+        _body: &str,
+        _verdict: ReviewVerdict,
+        _comments: Vec<NewComment>,
+    ) -> ProviderResult<()> {
+        Err(ReviewError::Unsupported(
+            "this backend cannot submit reviews".into(),
+        ))
     }
 }
 

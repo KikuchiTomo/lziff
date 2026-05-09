@@ -43,6 +43,127 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.show_help {
         render_help(f, area, app);
     }
+    if app
+        .review
+        .as_ref()
+        .and_then(|r| r.modal.as_ref())
+        .is_some()
+    {
+        render_review_modal(f, area, app);
+    }
+}
+
+fn render_review_modal(f: &mut Frame, area: Rect, app: &App) {
+    use crate::review_session::Modal;
+    let theme = &app.config.theme;
+    let Some(review) = app.review.as_ref() else {
+        return;
+    };
+    let Some(modal) = review.modal.as_ref() else {
+        return;
+    };
+
+    // Centered popup, 70% wide, 60% tall, capped.
+    let w = (area.width as u32 * 70 / 100).clamp(40, 100) as u16;
+    let h = (area.height as u32 * 60 / 100).clamp(8, 30) as u16;
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(h)) / 2;
+    let r = Rect::new(x, y, w, h);
+    f.render_widget(Clear, r);
+
+    match modal {
+        Modal::Comment(m) => {
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .title(format!(" Comment · {}:{} ", m.path, m.line))
+                .border_style(Style::default().fg(theme.help_border_fg))
+                .style(Style::default().bg(theme.help_panel_bg));
+            let inner = block.inner(r);
+            f.render_widget(block, r);
+
+            let layout = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(1), Constraint::Length(1)])
+                .split(inner);
+            f.render_widget(&m.textarea, layout[0]);
+            let hint = Line::from(vec![
+                Span::styled(" Esc ", Style::default().fg(theme.help_keys_fg)),
+                Span::styled("cancel    ", Style::default().fg(theme.help_desc_fg)),
+                Span::styled(" Ctrl-S ", Style::default().fg(theme.help_keys_fg)),
+                Span::styled("save draft", Style::default().fg(theme.help_desc_fg)),
+            ]);
+            f.render_widget(Paragraph::new(hint).style(Style::default().bg(theme.help_panel_bg)), layout[1]);
+        }
+        Modal::Submit(m) => {
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .title(format!(
+                    " Submit review · {} draft{} ",
+                    review.drafts.len(),
+                    if review.drafts.len() == 1 { "" } else { "s" }
+                ))
+                .border_style(Style::default().fg(theme.help_border_fg))
+                .style(Style::default().bg(theme.help_panel_bg));
+            let inner = block.inner(r);
+            f.render_widget(block, r);
+
+            let layout = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(2), // verdict picker
+                    Constraint::Length(1), // separator
+                    Constraint::Min(1),    // body
+                    Constraint::Length(1), // hint
+                ])
+                .split(inner);
+            // Verdict row
+            let verdicts = [
+                (review_protocol::ReviewVerdict::Comment, "Comment"),
+                (review_protocol::ReviewVerdict::Approve, "Approve"),
+                (review_protocol::ReviewVerdict::RequestChanges, "Request changes"),
+            ];
+            let mut spans: Vec<Span> = Vec::new();
+            spans.push(Span::styled("  ", Style::default().bg(theme.help_panel_bg)));
+            for (v, label) in &verdicts {
+                let selected = m.verdict == *v;
+                let prefix = if selected { "▎" } else { " " };
+                let style = if selected {
+                    Style::default()
+                        .fg(theme.help_keys_fg)
+                        .bg(theme.help_panel_bg)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(theme.help_desc_fg).bg(theme.help_panel_bg)
+                };
+                spans.push(Span::styled(format!("{prefix} {label}  "), style));
+            }
+            f.render_widget(
+                Paragraph::new(Line::from(spans)).style(Style::default().bg(theme.help_panel_bg)),
+                layout[0],
+            );
+            // body label / textarea
+            f.render_widget(&m.textarea, layout[2]);
+            let focus = match m.focus {
+                crate::review_session::SubmitFocus::Verdict => "verdict",
+                crate::review_session::SubmitFocus::Body => "body",
+            };
+            let hint = Line::from(vec![
+                Span::styled(format!(" focus: {focus}    "), Style::default().fg(theme.help_desc_fg)),
+                Span::styled(" Tab ", Style::default().fg(theme.help_keys_fg)),
+                Span::styled("switch    ", Style::default().fg(theme.help_desc_fg)),
+                Span::styled(" a/c/r ", Style::default().fg(theme.help_keys_fg)),
+                Span::styled("verdict    ", Style::default().fg(theme.help_desc_fg)),
+                Span::styled(" Esc ", Style::default().fg(theme.help_keys_fg)),
+                Span::styled("cancel    ", Style::default().fg(theme.help_desc_fg)),
+                Span::styled(" Ctrl-S ", Style::default().fg(theme.help_keys_fg)),
+                Span::styled("submit", Style::default().fg(theme.help_desc_fg)),
+            ]);
+            f.render_widget(
+                Paragraph::new(hint).style(Style::default().bg(theme.help_panel_bg)),
+                layout[3],
+            );
+        }
+    }
 }
 
 fn render_title(f: &mut Frame, area: Rect, app: &App) {
