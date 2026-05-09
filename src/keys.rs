@@ -38,6 +38,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Action {
         ConfigAction::ToggleHelp => app.show_help = true,
         ConfigAction::CloseHelp => {} // only meaningful while help is open
         ConfigAction::ToggleFocus => app.toggle_focus(),
+        ConfigAction::ToggleFilesPanel => app.toggle_files_panel(),
         ConfigAction::Reload => app.reload_entries(),
         ConfigAction::NextFile => app.select_next(),
         ConfigAction::PrevFile => app.select_prev(),

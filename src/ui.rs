@@ -74,20 +74,37 @@ fn render_title(f: &mut Frame, area: Rect, app: &App) {
 fn render_files(f: &mut Frame, area: Rect, app: &App, layout: &mut LayoutCache) {
     let theme = &app.config.theme;
     let focused = matches!(app.focus, Focus::Files);
+    // Title shows entry count when there's something to show; otherwise just
+    // the bracketed label so the panel still reads cleanly when empty.
+    let title = if app.entries.is_empty() {
+        app.strings.title_files_panel.clone()
+    } else {
+        format!(
+            "{} {} ",
+            app.strings.title_files_panel.trim_end(),
+            app.entries.len()
+        )
+    };
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(app.strings.title_files_panel.clone())
+        .title(title)
         .border_style(border_style(theme, focused));
     layout.files_inner = block.inner(area);
 
+    // Each row: " ● filename" — `●` is colored by status (M/A/D/?/etc.),
+    // filename in default fg, both bold so the panel reads compactly.
     let items: Vec<ListItem> = app
         .entries
         .iter()
         .map(|e| {
             let color = status_color(&e.status);
+            let mark_style = Style::default().fg(color).add_modifier(Modifier::BOLD);
+            let name_style = Style::default().add_modifier(Modifier::BOLD);
             ListItem::new(Line::from(vec![
-                Span::styled(format!(" {} ", e.status), Style::default().fg(color)),
-                Span::raw(e.display.clone()),
+                Span::raw(" "),
+                Span::styled("●", mark_style),
+                Span::raw(" "),
+                Span::styled(e.display.clone(), name_style),
             ]))
         })
         .collect();

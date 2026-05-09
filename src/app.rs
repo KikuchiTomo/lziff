@@ -326,8 +326,22 @@ impl App {
     pub fn toggle_focus(&mut self) {
         self.focus = match self.focus {
             Focus::Files => Focus::Diff,
-            Focus::Diff => Focus::Files,
+            Focus::Diff => {
+                if self.show_files_panel {
+                    Focus::Files
+                } else {
+                    Focus::Diff
+                }
+            }
         };
+    }
+
+    pub fn toggle_files_panel(&mut self) {
+        self.show_files_panel = !self.show_files_panel;
+        // Don't strand the focus on a hidden panel.
+        if !self.show_files_panel && matches!(self.focus, Focus::Files) {
+            self.focus = Focus::Diff;
+        }
     }
 
     pub fn header_label(&self) -> (String, String) {

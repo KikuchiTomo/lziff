@@ -21,6 +21,7 @@ pub enum Action {
     ToggleHelp,
     CloseHelp,
     ToggleFocus,
+    ToggleFilesPanel,
     Reload,
     NextFile,
     PrevFile,
@@ -74,6 +75,7 @@ impl Keymap {
                 b("?", Action::ToggleHelp),
                 b("Esc", Action::CloseHelp),
                 b("Tab", Action::ToggleFocus),
+                b("F", Action::ToggleFilesPanel),
                 b("r", Action::Reload),
                 b("n", Action::NextFile),
                 b("p", Action::PrevFile),
@@ -189,7 +191,7 @@ pub struct LayoutConfig {
 impl LayoutConfig {
     fn default() -> Self {
         Self {
-            files_panel_width_pct: 28,
+            files_panel_width_pct: 20,
             ribbon_width: 5,
             target_y_divisor: 3,
         }
@@ -484,6 +486,7 @@ fn parse_action(s: &str) -> Option<Action> {
         "toggle_help" => Action::ToggleHelp,
         "close_help" => Action::CloseHelp,
         "toggle_focus" => Action::ToggleFocus,
+        "toggle_files_panel" => Action::ToggleFilesPanel,
         "reload" => Action::Reload,
         "next_file" => Action::NextFile,
         "prev_file" => Action::PrevFile,
