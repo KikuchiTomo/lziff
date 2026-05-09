@@ -12,6 +12,11 @@ under `## [vX.Y.Z] - YYYY-MM-DD`, with the standard subsection headings
 
 ## [Unreleased]
 
+## [v0.1.0-rc.1] - 2026-05-09
+
+First release candidate. Shakedown for the cargo-dist pipeline; the
+feature set targeting `v0.1.0` is otherwise complete.
+
 ### Added
 
 - Snap-aligned side-by-side diff viewer with click-to-snap selection,

@@ -1,6 +1,6 @@
 [package]
 name = "lziff"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 edition = "2021"
 license = "MIT"
 description = "A cross-platform TUI diff & review tool with JetBrains-style snap-aligned side-by-side diffs"
