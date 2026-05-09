@@ -6,6 +6,9 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "A cross-platform TUI diff & review tool with JetBrains-style snap-aligned side-by-side diffs"
+keywords = ["diff", "git", "tui", "review", "terminal"]
+categories = ["command-line-utilities", "development-tools"]
+readme = "../../README.md"
 
 [[bin]]
 name = "lziff"

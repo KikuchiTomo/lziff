@@ -1,0 +1,62 @@
+name: Publish to crates.io
+
+on:
+  push:
+    tags:
+      - '**[0-9]+.[0-9]+.[0-9]+*'
+  # Lets us re-run a publish manually from the Actions tab without
+  # cutting a fresh tag — handy when the first run got partway through
+  # before failing on a transient registry hiccup.
+  workflow_dispatch:
+
+# Don't queue concurrent publishes for the same tag — `cargo publish`
+# is not idempotent (it fails if the version already exists), so one
+# in-flight job at a time is enough.
+concurrency:
+  group: publish-crates-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish lziff-review-protocol → lziff-github → lziff
+    runs-on: ubuntu-22.04
+    env:
+      # The registry token is registered as `CRATE_IO_TOKEN` in this
+      # repo's Actions secrets. Cargo expects either CARGO_REGISTRY_TOKEN
+      # or `--token` on the command line; we set the env var inline for
+      # each publish step so a single misconfigured secret can't leak
+      # across unrelated jobs.
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CRATE_IO_TOKEN }}
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Sanity check: the secret must be present, otherwise the publish
+      # step will fail with a confusing "401 Unauthorized" several
+      # minutes into the run.
+      - name: Check token is configured
+        run: |
+          if [ -z "${CARGO_REGISTRY_TOKEN}" ]; then
+            echo "::error::CRATE_IO_TOKEN secret is not set on this repository."
+            exit 1
+          fi
+
+      # crates.io rejects publishing a version that already exists.
+      # Skip-if-published lets a re-run pick up where a previous run
+      # left off (e.g. review-protocol was published, lziff-github
+      # failed midway).
+      - name: Publish lziff-review-protocol
+        run: ./.github/scripts/publish-crate.sh lziff-review-protocol
+
+      - name: Wait for index (lziff-review-protocol)
+        run: ./.github/scripts/wait-for-crate.sh lziff-review-protocol
+
+      - name: Publish lziff-github
+        run: ./.github/scripts/publish-crate.sh lziff-github
+
+      - name: Wait for index (lziff-github)
+        run: ./.github/scripts/wait-for-crate.sh lziff-github
+
+      - name: Publish lziff
+        run: ./.github/scripts/publish-crate.sh lziff

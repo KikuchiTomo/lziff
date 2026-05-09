@@ -6,6 +6,8 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "GitHub backend for lziff. Future plugin candidate; stays compile-time isolated from the lziff body."
+keywords = ["diff", "git", "github", "review", "tui"]
+categories = ["development-tools"]
 
 [dependencies]
 anyhow = { workspace = true }

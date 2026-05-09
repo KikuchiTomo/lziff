@@ -1,11 +1,19 @@
 [package]
-name = "review-protocol"
+# Published as `lziff-review-protocol` on crates.io to keep the
+# namespace clear — `review-protocol` would be a generic-looking grab
+# for what is, today, an lziff-internal plugin contract. Inside the
+# workspace we still alias it to `review-protocol` via the workspace
+# dependency's `package = "..."` field, so `use review_protocol::...`
+# keeps working without any Rust source changes.
+name = "lziff-review-protocol"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "Plugin protocol for lziff review providers (GitHub, GitLab, ...)."
+keywords = ["diff", "review", "lziff", "tui"]
+categories = ["development-tools"]
 
 [dependencies]
 anyhow = { workspace = true }

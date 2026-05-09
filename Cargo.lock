@@ -406,8 +406,8 @@ dependencies = [
  "crossterm",
  "dirs",
  "lziff-github",
+ "lziff-review-protocol",
  "ratatui",
- "review-protocol",
  "serde",
  "similar",
  "toml",
@@ -421,9 +421,18 @@ name = "lziff-github"
 version = "0.1.2"
 dependencies = [
  "anyhow",
- "review-protocol",
+ "lziff-review-protocol",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "lziff-review-protocol"
+version = "0.1.2"
+dependencies = [
+ "anyhow",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]
@@ -541,15 +550,6 @@ checksum = "ba009ff324d1fc1b900bd1fdb31564febe58a8ccc8a6fdbb93b543d33b13ca43"
 dependencies = [
  "getrandom",
  "libredox",
- "thiserror",
-]
-
-[[package]]
-name = "review-protocol"
-version = "0.1.2"
-dependencies = [
- "anyhow",
- "serde",
  "thiserror",
 ]
 
