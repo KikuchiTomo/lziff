@@ -144,10 +144,14 @@ fn resolve_base_sha(workdir: &std::path::Path, base_ref: &str, head_sha: &str) -
     // Best-effort fetch; if origin already has the ref this is a fast no-op,
     // and if the fetch fails (e.g. offline) we still try to resolve from
     // whatever's already in the local refs.
+    //
+    // Inherit stdio so SSH passphrase / credential prompts surface in the
+    // user's terminal — capturing them would silently hang the host.
+    eprintln!("lziff:   git fetch --no-tags origin {base_ref}…");
     let _ = Command::new("git")
         .current_dir(workdir)
         .args(["fetch", "--no-tags", "origin", base_ref])
-        .output();
+        .status();
     // Try merge-base FETCH_HEAD..head_sha; if FETCH_HEAD isn't set (no
     // fetch), fall back to origin/<base_ref>.
     for base_spec in ["FETCH_HEAD", &format!("origin/{base_ref}"), base_ref] {

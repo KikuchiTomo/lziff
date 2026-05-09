@@ -131,14 +131,28 @@ impl ReviewProvider for GithubProvider {
 
         let pr_ref = format!("pull/{}/head", pr.number);
         let local_ref = format!("refs/lziff/review/{}", pr.number);
-        run_git(&[
+        // Inherit stdio for fetch + worktree add so the user sees git's
+        // own progress output, and — critically — so SSH/credential
+        // prompts (passphrase, host-key confirmation, askpass helpers)
+        // are routed to the user's terminal. Capturing them, as
+        // `run_git` does, is what made `--review` look hung when origin
+        // needed a credential.
+        eprintln!(
+            "lziff:   git fetch origin +{pr_ref}:{local_ref}…"
+        );
+        run_git_inherit(&[
             "fetch",
             "origin",
             &format!("+{pr_ref}:{local_ref}"),
         ])?;
         // If a stale worktree exists at this path, remove it first.
         let _ = run_git(&["worktree", "remove", "--force", dest.to_str().unwrap_or("")]);
-        run_git(&[
+        eprintln!(
+            "lziff:   git worktree add {} {}…",
+            dest.display(),
+            short_sha(&pr.head_sha)
+        );
+        run_git_inherit(&[
             "worktree",
             "add",
             "--detach",
@@ -271,6 +285,29 @@ fn run_git(args: &[&str]) -> ProviderResult<Vec<u8>> {
         )));
     }
     Ok(out.stdout)
+}
+
+/// Run `git` with stdio inherited from the parent process. Use this for
+/// commands that may prompt the user (fetch over SSH/HTTPS, worktree
+/// commands that touch the filesystem) so progress and prompts flow to
+/// the user's terminal instead of being silently captured.
+fn run_git_inherit(args: &[&str]) -> ProviderResult<()> {
+    let status = Command::new("git")
+        .args(args)
+        .status()
+        .map_err(|e| ReviewError::Backend(format!("spawn git: {e}")))?;
+    if !status.success() {
+        return Err(ReviewError::Backend(format!(
+            "git {} failed (exit {})",
+            args.join(" "),
+            status.code().unwrap_or(-1)
+        )));
+    }
+    Ok(())
+}
+
+fn short_sha(sha: &str) -> String {
+    sha.chars().take(8).collect()
 }
 
 fn git_current_branch() -> Result<String, ReviewError> {
