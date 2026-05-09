@@ -35,6 +35,11 @@ pub trait DiffSource {
         let _ = current_id;
         0
     }
+    /// Whether to render the Files panel. Sources that only ever produce a
+    /// single fixed entry (file pair) can hide it for a roomier diff.
+    fn show_files_panel(&self) -> bool {
+        true
+    }
 }
 
 fn mtime_ms(p: &Path) -> u64 {
@@ -77,6 +82,10 @@ impl DiffSource for FilePair {
 
     fn signature(&self, _: Option<&str>) -> u64 {
         mtime_ms(&self.left).wrapping_mul(1469598103934665603).wrapping_add(mtime_ms(&self.right))
+    }
+
+    fn show_files_panel(&self) -> bool {
+        false
     }
 }
 

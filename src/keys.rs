@@ -15,47 +15,40 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Action {
         return Action::Continue;
     }
 
-    match key.code {
-        KeyCode::Char('q') => return Action::Quit,
-        KeyCode::Char('?') => app.show_help = true,
-        KeyCode::Tab => app.toggle_focus(),
-        KeyCode::Char('r') => app.reload_entries(),
-        KeyCode::Char('n') => app.select_next(),
-        KeyCode::Char('p') => app.select_prev(),
-        _ => match app.focus {
-            Focus::Files => handle_files(app, key),
-            Focus::Diff => handle_diff(app, key),
-        },
-    }
-    Action::Continue
-}
-
-fn handle_files(app: &mut App, key: KeyEvent) {
-    match key.code {
-        KeyCode::Char('j') | KeyCode::Down => app.select_next(),
-        KeyCode::Char('k') | KeyCode::Up => app.select_prev(),
-        KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => app.focus = Focus::Diff,
-        _ => {}
-    }
-}
-
-fn handle_diff(app: &mut App, key: KeyEvent) {
     match (key.code, key.modifiers) {
+        (KeyCode::Char('q'), _) => return Action::Quit,
+        (KeyCode::Char('?'), _) => app.show_help = true,
+        (KeyCode::Tab, _) => app.toggle_focus(),
+        (KeyCode::Char('r'), _) => app.reload_entries(),
+        (KeyCode::Char('n'), _) => app.select_next(),
+        (KeyCode::Char('p'), _) => app.select_prev(),
+        (KeyCode::Char('='), _) => app.resnap(),
+
         (KeyCode::Char('j') | KeyCode::Down, _) => app.cursor_down(1),
         (KeyCode::Char('k') | KeyCode::Up, _) => app.cursor_up(1),
         (KeyCode::Char('J'), _) => app.next_hunk(),
         (KeyCode::Char('K'), _) => app.prev_hunk(),
         (KeyCode::Char('d'), KeyModifiers::CONTROL) => app.cursor_down(15),
         (KeyCode::Char('u'), KeyModifiers::CONTROL) => app.cursor_up(15),
-        (KeyCode::Char('g'), _) => app.cursor_row = 0,
+        (KeyCode::Char('g'), _) => {
+            app.left_top = 0;
+            app.right_top = 0;
+        }
         (KeyCode::Char('G'), _) => {
-            if !app.diff.rows.is_empty() {
-                app.cursor_row = app.diff.rows.len() - 1;
+            app.left_top = app.diff.left_render.len().saturating_sub(1);
+            app.right_top = app.diff.right_render.len().saturating_sub(1);
+        }
+
+        (KeyCode::Enter, _) => {
+            if matches!(app.focus, Focus::Files) {
+                app.focus = Focus::Diff;
             }
         }
-        (KeyCode::Char('h') | KeyCode::Left, _) => app.focus = Focus::Files,
+        (KeyCode::Left | KeyCode::Char('h'), _) => app.focus = Focus::Files,
+        (KeyCode::Right | KeyCode::Char('l'), _) => app.focus = Focus::Diff,
         _ => {}
     }
+    Action::Continue
 }
 
 pub fn handle_mouse(app: &mut App, m: MouseEvent) {

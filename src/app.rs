@@ -1,4 +1,4 @@
-use crate::diff::{Diff, RowKind};
+use crate::diff::{Diff, LineKind};
 use crate::source::{DiffPayload, DiffSource, Entry};
 use anyhow::Result;
 use ratatui::layout::Rect;
@@ -9,13 +9,18 @@ pub enum Focus {
     Diff,
 }
 
-/// Layout rectangles captured during the last render so input handlers
-/// can hit-test mouse events without re-running the layout calculation.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum AnchorSide {
+    Left,
+    Right,
+}
+
 #[derive(Default, Clone, Copy)]
 pub struct LayoutCache {
     pub files_inner: Rect,
-    pub diff_inner: Rect,
-    pub diff_top_row: usize,
+    pub diff_left_inner: Rect,
+    pub diff_right_inner: Rect,
+    pub viewport_h: u16,
 }
 
 pub struct App {
@@ -24,11 +29,23 @@ pub struct App {
     pub selected: usize,
     pub diff: Diff,
     pub payload: Option<DiffPayload>,
-    pub cursor_row: usize,
+    /// Independent scroll positions per pane. The "selected line stays put"
+    /// click UX requires that we can adjust one pane's scroll without
+    /// touching the other's.
+    pub left_top: usize,
+    pub right_top: usize,
+    /// Screen row of the alignment band. Set by clicks (becomes the click
+    /// row) and otherwise stays where the user left it. Equal anchors land
+    /// on this row when both panes show their counterparts there.
+    pub cursor_y: usize,
+    /// Which side was clicked last — used to decide which pane scrolls
+    /// "naturally" and which one re-snaps to its counterpart on j/k.
+    pub anchor_side: AnchorSide,
     pub focus: Focus,
     pub show_help: bool,
     pub status: String,
     pub layout: LayoutCache,
+    pub show_files_panel: bool,
     last_signature: u64,
 }
 
@@ -36,17 +53,22 @@ impl App {
     pub fn new(source: Box<dyn DiffSource>) -> Result<Self> {
         let entries = source.list()?;
         let signature = source.signature(entries.first().map(|e| e.id.as_str()));
+        let show_files = source.show_files_panel();
         let mut app = Self {
             source,
             entries,
             selected: 0,
             diff: Diff::default(),
             payload: None,
-            cursor_row: 0,
-            focus: Focus::Files,
+            left_top: 0,
+            right_top: 0,
+            cursor_y: 0,
+            anchor_side: AnchorSide::Left,
+            focus: if show_files { Focus::Files } else { Focus::Diff },
             show_help: false,
             status: String::new(),
             layout: LayoutCache::default(),
+            show_files_panel: show_files,
             last_signature: signature,
         };
         app.reload_diff();
@@ -72,15 +94,21 @@ impl App {
     }
 
     pub fn reload_diff(&mut self) {
-        self.cursor_row = 0;
+        self.left_top = 0;
+        self.right_top = 0;
+        self.cursor_y = 0;
+        self.anchor_side = AnchorSide::Left;
         self.reload_diff_inner();
     }
 
     fn reload_diff_keep_view(&mut self) {
-        let prev = self.cursor_row;
         self.reload_diff_inner();
-        let max = self.diff.rows.len().saturating_sub(1);
-        self.cursor_row = prev.min(max);
+        self.left_top = self
+            .left_top
+            .min(self.diff.left_render.len().saturating_sub(1).max(0));
+        self.right_top = self
+            .right_top
+            .min(self.diff.right_render.len().saturating_sub(1).max(0));
     }
 
     fn reload_diff_inner(&mut self) {
@@ -102,8 +130,6 @@ impl App {
         }
     }
 
-    /// Called every tick. If the underlying source changed (file mtime, git index, etc.),
-    /// reload entries and the current diff while preserving cursor position.
     pub fn poll_changes(&mut self) {
         let id = self.entries.get(self.selected).map(|e| e.id.clone());
         let sig = self.source.signature(id.as_deref());
@@ -142,35 +168,148 @@ impl App {
         }
     }
 
+    /// Snap-aware scroll: at each step, if advancing both panes by 1 would
+    /// move them into different segments (one side reaches the next equal
+    /// anchor while the other's still inside the change), pause the side
+    /// that exited and only advance the side that's still catching up.
+    /// When both sides finally reach their respective segment boundary,
+    /// they advance together — the snap.
     pub fn cursor_down(&mut self, n: usize) {
-        let max = self.diff.rows.len().saturating_sub(1);
-        self.cursor_row = (self.cursor_row + n).min(max);
+        if matches!(self.focus, Focus::Files) {
+            for _ in 0..n {
+                self.select_next();
+            }
+            return;
+        }
+        for _ in 0..n {
+            self.scroll_one(true);
+        }
     }
 
     pub fn cursor_up(&mut self, n: usize) {
-        self.cursor_row = self.cursor_row.saturating_sub(n);
+        if matches!(self.focus, Focus::Files) {
+            for _ in 0..n {
+                self.select_prev();
+            }
+            return;
+        }
+        for _ in 0..n {
+            self.scroll_one(false);
+        }
     }
 
+    fn scroll_one(&mut self, down: bool) {
+        let l_idx = self.left_top + self.cursor_y;
+        let r_idx = self.right_top + self.cursor_y;
+        if down {
+            let l_at_end = l_idx + 1 >= self.diff.left_render.len();
+            let r_at_end = r_idx + 1 >= self.diff.right_render.len();
+            if l_at_end && r_at_end {
+                return;
+            }
+            let new_l = l_idx.saturating_add(1);
+            let new_r = r_idx.saturating_add(1);
+            let (adv_l, adv_r) = self.decide_advance(l_idx, r_idx, new_l, new_r);
+            if adv_l && !l_at_end {
+                self.left_top = self.left_top.saturating_add(1);
+            }
+            if adv_r && !r_at_end {
+                self.right_top = self.right_top.saturating_add(1);
+            }
+        } else {
+            if l_idx == 0 && r_idx == 0 {
+                return;
+            }
+            let new_l = l_idx.saturating_sub(1);
+            let new_r = r_idx.saturating_sub(1);
+            let (adv_l, adv_r) = self.decide_advance(l_idx, r_idx, new_l, new_r);
+            if adv_l && self.left_top > 0 {
+                self.left_top -= 1;
+            }
+            if adv_r && self.right_top > 0 {
+                self.right_top -= 1;
+            }
+        }
+    }
+
+    fn decide_advance(
+        &self,
+        l_idx: usize,
+        r_idx: usize,
+        new_l: usize,
+        new_r: usize,
+    ) -> (bool, bool) {
+        let l_seg = self.diff.segment_for_left_render(l_idx);
+        let r_seg = self.diff.segment_for_right_render(r_idx);
+        let new_l_seg = self.diff.segment_for_left_render(new_l);
+        let new_r_seg = self.diff.segment_for_right_render(new_r);
+        if new_l_seg == new_r_seg {
+            // Both will land in the same segment after the step → fine,
+            // both advance together (this includes the "snap" moment when
+            // they reach the next equal anchor simultaneously).
+            return (true, true);
+        }
+        // Diverge: only advance the side that *stays* inside its current
+        // segment. The side that would jump ahead is paused until the
+        // other catches up.
+        let l_stays = new_l_seg == l_seg;
+        let r_stays = new_r_seg == r_seg;
+        (l_stays, r_stays)
+    }
+
+    /// Snap the non-anchor pane to whatever the anchor pane currently shows
+    /// at the cursor row. Used by "=" to re-align after the panes drift.
+    pub fn resnap(&mut self) {
+        match self.anchor_side {
+            AnchorSide::Left => {
+                let l = self.left_top + self.cursor_y;
+                if l < self.diff.left_render.len() {
+                    let r = self.diff.corresponding_right_for_left(l);
+                    let cy = self.cursor_y.min(r);
+                    self.cursor_y = cy;
+                    self.left_top = l.saturating_sub(cy);
+                    self.right_top = r.saturating_sub(cy);
+                }
+            }
+            AnchorSide::Right => {
+                let r = self.right_top + self.cursor_y;
+                if r < self.diff.right_render.len() {
+                    let l = self.diff.corresponding_left_for_right(r);
+                    let cy = self.cursor_y.min(l);
+                    self.cursor_y = cy;
+                    self.right_top = r.saturating_sub(cy);
+                    self.left_top = l.saturating_sub(cy);
+                }
+            }
+        }
+    }
+
+    /// Jump to the next change segment's start, snapping both panes to its
+    /// render-row anchors at the cursor row.
     pub fn next_hunk(&mut self) {
-        if let Some(&(s, _)) = self
-            .diff
-            .hunks
-            .iter()
-            .find(|(s, _)| *s > self.cursor_row)
-        {
-            self.cursor_row = s;
+        let l_at_cursor = self.left_top + self.cursor_y;
+        for seg in &self.diff.segments {
+            if seg.is_change && seg.l_render_start > l_at_cursor {
+                self.left_top = seg.l_render_start.saturating_sub(self.cursor_y);
+                self.right_top = seg.r_render_start.saturating_sub(self.cursor_y);
+                self.anchor_side = AnchorSide::Left;
+                return;
+            }
         }
     }
 
     pub fn prev_hunk(&mut self) {
-        if let Some(&(s, _)) = self
-            .diff
-            .hunks
-            .iter()
-            .rev()
-            .find(|(_, e)| *e <= self.cursor_row)
-        {
-            self.cursor_row = s;
+        let l_at_cursor = self.left_top + self.cursor_y;
+        let mut last: Option<(usize, usize)> = None;
+        for seg in &self.diff.segments {
+            if seg.is_change && seg.l_render_start < l_at_cursor {
+                last = Some((seg.l_render_start, seg.r_render_start));
+            }
+        }
+        if let Some((l, r)) = last {
+            self.left_top = l.saturating_sub(self.cursor_y);
+            self.right_top = r.saturating_sub(self.cursor_y);
+            self.anchor_side = AnchorSide::Left;
         }
     }
 
@@ -193,28 +332,60 @@ impl App {
         let mut add = 0;
         let mut del = 0;
         let mut mods = 0;
-        for r in &self.diff.rows {
-            match r.kind {
-                RowKind::Insert => add += 1,
-                RowKind::Delete => del += 1,
-                RowKind::Replace => mods += 1,
-                RowKind::Equal => {}
+        for l in &self.diff.right {
+            match l.kind {
+                LineKind::Standalone => add += 1,
+                LineKind::Modified => mods += 1,
+                LineKind::Equal => {}
+            }
+        }
+        for l in &self.diff.left {
+            if l.kind == LineKind::Standalone {
+                del += 1;
             }
         }
         (add, del, mods)
     }
 
+    /// Click handler implementing the "selected side stays" snap UX:
+    /// the clicked pane's `*_top` is left untouched, the cursor row is set
+    /// to where the user clicked, and the *other* pane is snapped so its
+    /// corresponding line lands at that same row.
     pub fn handle_click(&mut self, x: u16, y: u16) {
         if rect_contains(self.layout.files_inner, x, y) {
             let row = (y - self.layout.files_inner.y) as usize;
             self.select_index(row);
             self.focus = Focus::Files;
-        } else if rect_contains(self.layout.diff_inner, x, y) {
-            let row = (y - self.layout.diff_inner.y) as usize;
-            let target = self.layout.diff_top_row + row;
-            if target < self.diff.rows.len() {
-                self.cursor_row = target;
+            return;
+        }
+        if rect_contains(self.layout.diff_left_inner, x, y) {
+            let row = (y - self.layout.diff_left_inner.y) as usize;
+            let l_idx = self.left_top + row;
+            if l_idx >= self.diff.left_render.len() {
+                return;
             }
+            // Snap reliability: if the corresponding row would land above the
+            // file (negative scroll), pull cursor_y up instead of letting the
+            // snap silently fail.
+            let r = self.diff.corresponding_right_for_left(l_idx);
+            let cy = row.min(r);
+            self.cursor_y = cy;
+            self.anchor_side = AnchorSide::Left;
+            self.left_top = l_idx.saturating_sub(cy);
+            self.right_top = r.saturating_sub(cy);
+            self.focus = Focus::Diff;
+        } else if rect_contains(self.layout.diff_right_inner, x, y) {
+            let row = (y - self.layout.diff_right_inner.y) as usize;
+            let r_idx = self.right_top + row;
+            if r_idx >= self.diff.right_render.len() {
+                return;
+            }
+            let l = self.diff.corresponding_left_for_right(r_idx);
+            let cy = row.min(l);
+            self.cursor_y = cy;
+            self.anchor_side = AnchorSide::Right;
+            self.right_top = r_idx.saturating_sub(cy);
+            self.left_top = l.saturating_sub(cy);
             self.focus = Focus::Diff;
         }
     }
@@ -229,7 +400,9 @@ impl App {
                     self.select_prev();
                 }
             }
-        } else if rect_contains(self.layout.diff_inner, x, y) || matches!(self.focus, Focus::Diff) {
+        } else if rect_contains(self.layout.diff_left_inner, x, y)
+            || rect_contains(self.layout.diff_right_inner, x, y)
+        {
             if down {
                 self.cursor_down(STEP);
             } else {

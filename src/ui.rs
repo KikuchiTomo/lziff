@@ -1,5 +1,5 @@
-use crate::app::{App, Focus, LayoutCache};
-use crate::diff::{Row, RowKind, Segment, SegmentKind, Side};
+use crate::app::{AnchorSide, App, Focus, LayoutCache};
+use crate::diff::{LineKind, PaneLine, Segment, SegmentKind};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -8,19 +8,21 @@ use ratatui::{
     Frame,
 };
 
-// Subtle row tints — meant to read as "this line is part of a change" without
-// drowning the text. The strong signal lives in the gutter bars and the
-// per-token highlight, not in the row background.
-const BG_DELETE_LINE: Color = Color::Rgb(48, 22, 26);
-const BG_INSERT_LINE: Color = Color::Rgb(20, 44, 26);
-// Filler rows sit at terminal-default to make the asymmetry obvious: in a
-// 3-vs-24 change block, the short side reads as "3 colored rows then nothing".
-const BG_FILLER: Color = Color::Reset;
-// Per-token highlights inside a Replace row. Strong enough to pop, restrained
-// enough not to look like a Christmas tree.
-const HL_INSERT: Color = Color::Rgb(50, 130, 70);
+const BG_DELETE: Color = Color::Rgb(48, 22, 26);
+const BG_INSERT: Color = Color::Rgb(20, 44, 26);
+const BG_MOD_LEFT: Color = Color::Rgb(48, 22, 26);
+const BG_MOD_RIGHT: Color = Color::Rgb(20, 44, 26);
 const HL_DELETE: Color = Color::Rgb(150, 60, 70);
+const HL_INSERT: Color = Color::Rgb(50, 130, 70);
 const FG_GUTTER: Color = Color::Rgb(120, 120, 120);
+
+const ANCHOR_BRIGHT: Color = Color::Rgb(245, 245, 250);
+const ANCHOR_SOFT: Color = Color::Rgb(190, 195, 210);
+/// Background tints used for the side bars in the ribbon. We fill these
+/// behind the anchor circles instead of drawing a `│` track because the
+/// vertical line collides with the circle glyphs and is hard to read.
+const TRACK_BG_LEFT: Color = Color::Rgb(60, 28, 32);
+const TRACK_BG_RIGHT: Color = Color::Rgb(26, 50, 32);
 
 pub fn render(f: &mut Frame, app: &mut App) {
     let area = f.area();
@@ -35,14 +37,17 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     render_title(f, chunks[0], app);
 
-    let body = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(28), Constraint::Min(20)])
-        .split(chunks[1]);
-
     let mut layout = LayoutCache::default();
-    render_files(f, body[0], app, &mut layout);
-    render_diff(f, body[1], app, &mut layout);
+    if app.show_files_panel {
+        let body = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(28), Constraint::Min(20)])
+            .split(chunks[1]);
+        render_files(f, body[0], app, &mut layout);
+        render_diff(f, body[1], app, &mut layout);
+    } else {
+        render_diff(f, chunks[1], app, &mut layout);
+    }
     app.layout = layout;
 
     render_status(f, chunks[2], app);
@@ -65,7 +70,7 @@ fn render_title(f: &mut Frame, area: Rect, app: &App) {
         ),
         Span::raw(" "),
         Span::styled(l, Style::default().fg(Color::Rgb(200, 120, 120))),
-        Span::raw("  →  "),
+        Span::raw("  ↔  "),
         Span::styled(r, Style::default().fg(Color::Rgb(120, 200, 140))),
         Span::raw("   "),
         Span::styled(format!("+{a}"), Style::default().fg(Color::Green)),
@@ -119,244 +124,544 @@ fn render_files(f: &mut Frame, area: Rect, app: &App, layout: &mut LayoutCache) 
 
 fn render_diff(f: &mut Frame, area: Rect, app: &App, layout: &mut LayoutCache) {
     let focused = matches!(app.focus, Focus::Diff);
-    let block = Block::default()
+
+    let (l_label, r_label) = app.header_label();
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(10),
+            Constraint::Length(5),
+            Constraint::Min(10),
+        ])
+        .split(area);
+
+    let l_block = Block::default()
         .borders(Borders::ALL)
-        .title(" Diff ")
-        .border_style(border_style(focused));
-    let inner = block.inner(area);
-    layout.diff_inner = inner;
-    f.render_widget(block, area);
+        .title(format!(" [Old] {} ", short_label(&l_label)))
+        .border_style(side_border_style(true, focused));
+    let r_block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" [New] {} ", short_label(&r_label)))
+        .border_style(side_border_style(false, focused));
 
-    if app.diff.rows.is_empty() {
-        let msg = if app.entries.is_empty() {
-            "no changes"
-        } else {
-            "(no diff)"
-        };
-        f.render_widget(
-            Paragraph::new(msg).style(Style::default().fg(Color::DarkGray)),
-            inner,
-        );
-        return;
-    }
+    let l_inner = l_block.inner(cols[0]);
+    let r_inner = r_block.inner(cols[2]);
+    let ribbon_area = Rect {
+        x: cols[1].x,
+        y: l_inner.y,
+        width: cols[1].width,
+        height: l_inner.height,
+    };
+    layout.diff_left_inner = l_inner;
+    layout.diff_right_inner = r_inner;
 
-    let viewport_h = inner.height as usize;
+    f.render_widget(l_block, cols[0]);
+    f.render_widget(r_block, cols[2]);
+
+    let viewport_h = l_inner.height.min(r_inner.height) as usize;
+    layout.viewport_h = viewport_h as u16;
     if viewport_h == 0 {
         return;
     }
 
-    // Auto-follow: keep cursor in view.
-    let mut top = layout.diff_top_row;
-    if app.cursor_row < top {
-        top = app.cursor_row;
-    } else if app.cursor_row >= top + viewport_h {
-        top = app.cursor_row + 1 - viewport_h;
-    }
-    layout.diff_top_row = top;
+    let cursor_y = app.cursor_y.min(viewport_h.saturating_sub(1));
+    let lineno_w_l = lineno_width(&app.diff.left);
+    let lineno_w_r = lineno_width(&app.diff.right);
 
-    let lineno_w = lineno_width(&app.diff.rows);
-    // 5 columns: gutter(L) | text(L) | bar(LR) | gutter(R) | text(R)
-    let bar_w: u16 = 2;
-    let gutter_w = lineno_w as u16;
-    let total_fixed = gutter_w * 2 + bar_w;
-    let text_w = inner.width.saturating_sub(total_fixed) / 2;
-
-    let cols = Layout::default()
+    let l_cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(gutter_w),
-            Constraint::Length(text_w),
-            Constraint::Length(bar_w),
-            Constraint::Length(gutter_w),
-            Constraint::Min(0),
-        ])
-        .split(inner);
+        .constraints([Constraint::Length(lineno_w_l as u16), Constraint::Min(1)])
+        .split(l_inner);
+    let r_cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(lineno_w_r as u16), Constraint::Min(1)])
+        .split(r_inner);
 
-    let mut left_no_lines: Vec<Line> = Vec::with_capacity(viewport_h);
-    let mut left_lines: Vec<Line> = Vec::with_capacity(viewport_h);
-    let mut bar_lines: Vec<Line> = Vec::with_capacity(viewport_h);
-    let mut right_no_lines: Vec<Line> = Vec::with_capacity(viewport_h);
-    let mut right_lines: Vec<Line> = Vec::with_capacity(viewport_h);
+    let mut l_no_lines: Vec<Line> = Vec::with_capacity(viewport_h);
+    let mut l_text_lines: Vec<Line> = Vec::with_capacity(viewport_h);
+    let mut r_no_lines: Vec<Line> = Vec::with_capacity(viewport_h);
+    let mut r_text_lines: Vec<Line> = Vec::with_capacity(viewport_h);
 
-    for i in 0..viewport_h {
-        let row_idx = top + i;
-        let Some(row) = app.diff.rows.get(row_idx) else {
-            left_no_lines.push(Line::raw(""));
-            left_lines.push(Line::raw(""));
-            bar_lines.push(Line::raw(""));
-            right_no_lines.push(Line::raw(""));
-            right_lines.push(Line::raw(""));
-            continue;
-        };
-        let is_cursor = row_idx == app.cursor_row;
+    let l_text_w = l_cols[1].width as usize;
+    let r_text_w = r_cols[1].width as usize;
 
-        let (lno, ltxt) = render_side(&row.left, row, true, is_cursor, text_w as usize, lineno_w);
-        let (rno, rtxt) = render_side(&row.right, row, false, is_cursor, text_w as usize, lineno_w);
-        left_no_lines.push(lno);
-        left_lines.push(ltxt);
-        bar_lines.push(render_bar(row, is_cursor));
-        right_no_lines.push(rno);
-        right_lines.push(rtxt);
+    for y in 0..viewport_h {
+        let li_render = app.left_top + y;
+        let ri_render = app.right_top + y;
+        let l_line = app
+            .diff
+            .left_render
+            .get(li_render)
+            .and_then(|opt| opt.as_ref().and_then(|&i| app.diff.left.get(i)));
+        let r_line = app
+            .diff
+            .right_render
+            .get(ri_render)
+            .and_then(|opt| opt.as_ref().and_then(|&i| app.diff.right.get(i)));
+        let is_alignment = y == cursor_y;
+
+        let (lno, ltxt) = render_pane_row(l_line, true, is_alignment, l_text_w, lineno_w_l);
+        let (rno, rtxt) = render_pane_row(r_line, false, is_alignment, r_text_w, lineno_w_r);
+        l_no_lines.push(lno);
+        l_text_lines.push(ltxt);
+        r_no_lines.push(rno);
+        r_text_lines.push(rtxt);
     }
 
-    f.render_widget(Paragraph::new(left_no_lines), cols[0]);
-    f.render_widget(Paragraph::new(left_lines), cols[1]);
-    f.render_widget(Paragraph::new(bar_lines), cols[2]);
-    f.render_widget(Paragraph::new(right_no_lines), cols[3]);
-    f.render_widget(Paragraph::new(right_lines), cols[4]);
+    let ribbon_lines = build_ribbon_grid(app, viewport_h, cursor_y);
+
+    f.render_widget(Paragraph::new(l_no_lines), l_cols[0]);
+    f.render_widget(Paragraph::new(l_text_lines), l_cols[1]);
+    f.render_widget(Paragraph::new(ribbon_lines), ribbon_area);
+    f.render_widget(Paragraph::new(r_no_lines), r_cols[0]);
+    f.render_widget(Paragraph::new(r_text_lines), r_cols[1]);
 }
 
-fn render_side(
-    side: &Side,
-    row: &Row,
-    is_left: bool,
-    is_cursor: bool,
-    width: usize,
-    lineno_w: usize,
-) -> (Line<'static>, Line<'static>) {
-    let is_filler = side.line_no.is_none();
-    let bg = row_bg(row.kind, is_left, is_filler);
-    let cursor_mod = if is_cursor {
-        Modifier::BOLD
-    } else {
-        Modifier::empty()
-    };
-    let cursor_bg_mod = if is_cursor {
-        Some(cursor_overlay(bg))
-    } else {
-        None
-    };
-    let line_bg = cursor_bg_mod.unwrap_or(bg);
+/// Compose the 5-column ribbon column. We fill a (viewport_h × 5) char grid
+/// with cell-by-cell logic:
+///
+/// - Each pane gets a continuous vertical "track" (`│`) on rows where its
+///   side is in a Modified or Standalone change. Tracks are tinted red on
+///   the left, green on the right.
+/// - Each *segment boundary* — start of an Equal block, start of a Change
+///   block — places anchors on both sides. If the two anchors land on the
+///   same row, draw a horizontal connector `○────○`. If they land on
+///   different rows (which happens at the trailing edge of a change block
+///   when one side has more content than the other), trace an L-shaped
+///   path through the middle column: `○─┐ … └─○`.
+/// - Anchors that sit on the cursor row are drawn filled (`●`) and bright
+///   white. Others are hollow (`○`) and a softer white.
+fn build_ribbon_grid(app: &App, viewport_h: usize, cursor_y: usize) -> Vec<Line<'static>> {
+    let cols_n = 5usize;
+    let mut grid: Vec<Vec<(char, Color, Color)>> =
+        vec![vec![(' ', Color::Reset, Color::Reset); cols_n]; viewport_h];
 
-    // Line number column.
-    let no_text = side
-        .line_no
-        .map(|n| format!(" {:>width$} ", n, width = lineno_w.saturating_sub(2)))
-        .unwrap_or_else(|| " ".repeat(lineno_w));
-    let no_line = Line::from(Span::styled(
-        no_text,
-        Style::default()
-            .fg(FG_GUTTER)
-            .bg(line_bg)
-            .add_modifier(cursor_mod),
-    ));
+    let bg_alignment = Color::Rgb(40, 50, 70);
 
-    // Text column with intra-line highlight.
-    let mut spans: Vec<Span> = Vec::new();
-    if is_filler {
-        // Filler is intentionally bare so the asymmetry of a change block reads
-        // as "real lines on this side, nothing on that side".
-        spans.push(Span::styled(" ".repeat(width), Style::default().bg(line_bg)));
-    } else {
-        let mut used = 0usize;
-        for seg in &side.segments {
-            let style = segment_style(row.kind, seg, is_left, line_bg, cursor_mod);
-            let text = visible_truncate(&seg.text, width.saturating_sub(used));
-            used += text.chars().count();
-            spans.push(Span::styled(text, style));
-            if used >= width {
-                break;
+    // Tracks for change rows: we *just* tint the background of cols 0 and 4
+    // so the side bars read as continuous colored stripes. Anchors land on
+    // top of the tint, never against a `│` glyph.
+    for (y, row) in grid.iter_mut().enumerate().take(viewport_h) {
+        let l_change = matches!(
+            app.diff.left_render.get(app.left_top + y),
+            Some(Some(idx)) if app.diff.left.get(*idx)
+                .is_some_and(|l| matches!(l.kind, LineKind::Modified | LineKind::Standalone))
+        );
+        let r_change = matches!(
+            app.diff.right_render.get(app.right_top + y),
+            Some(Some(idx)) if app.diff.right.get(*idx)
+                .is_some_and(|l| matches!(l.kind, LineKind::Modified | LineKind::Standalone))
+        );
+        // Phantom rows count as the change kind too — the side that lacks
+        // content still shows the colored band so the reader sees "this
+        // segment took space, just on the other side".
+        let l_phantom = matches!(app.diff.left_render.get(app.left_top + y), Some(None));
+        let r_phantom = matches!(app.diff.right_render.get(app.right_top + y), Some(None));
+        if l_change || l_phantom {
+            row[0].2 = TRACK_BG_LEFT;
+        }
+        if r_change || r_phantom {
+            row[4].2 = TRACK_BG_RIGHT;
+        }
+    }
+
+    // Plan which connector lines actually get drawn. Many segments can have
+    // anchors visible at once, and their L-shaped paths share the middle
+    // column — drawing all of them at once produces a tangled mess. So we
+    // greedily hide the most-conflicting path, repeatedly, until what's left
+    // doesn't crash. The user-selected segment (the one containing the
+    // alignment-row cursor) is *always* kept visible so clicking moves the
+    // visualization to the segment of interest.
+    let in_view = |y: isize| y >= 0 && y < viewport_h as isize;
+    let mut paths: Vec<PathPlan> = Vec::new();
+    for (idx, seg) in app.diff.segments.iter().enumerate() {
+        let yl = seg.l_render_start as isize - app.left_top as isize;
+        let yr = seg.r_render_start as isize - app.right_top as isize;
+        if !in_view(yl) && !in_view(yr) {
+            continue;
+        }
+        paths.push(PathPlan {
+            seg_idx: idx,
+            yl,
+            yr,
+            line_visible: true,
+        });
+    }
+    let active = active_segment_idx(app);
+    resolve_path_conflicts(&mut paths, viewport_h, cursor_y, active);
+
+    // Now actually draw.
+    for plan in &paths {
+        let seg = &app.diff.segments[plan.seg_idx];
+        let yl = plan.yl;
+        let yr = plan.yr;
+        let same_row = yl == yr && in_view(yl);
+        let l_filled = yl == cursor_y as isize || same_row;
+        let r_filled = yr == cursor_y as isize || same_row;
+        let l_glyph = if l_filled { '●' } else { '○' };
+        let r_glyph = if r_filled { '●' } else { '○' };
+
+        let (l_dim, l_bright, r_dim, r_bright) = if seg.is_change {
+            (
+                Color::Rgb(170, 80, 90),
+                Color::Rgb(230, 110, 120),
+                Color::Rgb(80, 160, 100),
+                Color::Rgb(120, 210, 140),
+            )
+        } else {
+            (ANCHOR_SOFT, ANCHOR_BRIGHT, ANCHOR_SOFT, ANCHOR_BRIGHT)
+        };
+        let l_color = if l_filled { l_bright } else { l_dim };
+        let r_color = if r_filled { r_bright } else { r_dim };
+        let line_color = if seg.is_change {
+            if l_filled || r_filled {
+                Color::Rgb(190, 170, 120)
+            } else {
+                Color::Rgb(140, 130, 90)
+            }
+        } else if l_filled || r_filled {
+            ANCHOR_BRIGHT
+        } else {
+            ANCHOR_SOFT
+        };
+
+        // Anchors are *always* drawn — only the connector line gets hidden
+        // when there's a conflict. The user can still see "there's an
+        // anchor here", just not its partner across the gutter. We only
+        // touch char + fg, leaving the background tint intact.
+        if in_view(yl) {
+            let cell = &mut grid[yl as usize][0];
+            cell.0 = l_glyph;
+            cell.1 = l_color;
+        }
+        if in_view(yr) {
+            let cell = &mut grid[yr as usize][4];
+            cell.0 = r_glyph;
+            cell.1 = r_color;
+        }
+
+        if !plan.line_visible {
+            continue;
+        }
+
+        if yl == yr {
+            if in_view(yl) {
+                let y = yl as usize;
+                grid[y][1].0 = '─';
+                grid[y][1].1 = line_color;
+                grid[y][2].0 = '─';
+                grid[y][2].1 = line_color;
+                grid[y][3].0 = '─';
+                grid[y][3].1 = line_color;
+            }
+        } else if yl < yr {
+            if in_view(yl) {
+                let y = yl as usize;
+                grid[y][1].0 = '─';
+                grid[y][1].1 = line_color;
+                grid[y][2].0 = '┐';
+                grid[y][2].1 = line_color;
+            }
+            let from = (yl + 1).max(0);
+            let to = yr.min(viewport_h as isize);
+            for y in from..to {
+                grid[y as usize][2].0 = '│';
+                grid[y as usize][2].1 = line_color;
+            }
+            if in_view(yr) {
+                let y = yr as usize;
+                grid[y][2].0 = '└';
+                grid[y][2].1 = line_color;
+                grid[y][3].0 = '─';
+                grid[y][3].1 = line_color;
+            }
+        } else {
+            if in_view(yr) {
+                let y = yr as usize;
+                grid[y][3].0 = '─';
+                grid[y][3].1 = line_color;
+                grid[y][2].0 = '┌';
+                grid[y][2].1 = line_color;
+            }
+            let from = (yr + 1).max(0);
+            let to = yl.min(viewport_h as isize);
+            for y in from..to {
+                grid[y as usize][2].0 = '│';
+                grid[y as usize][2].1 = line_color;
+            }
+            if in_view(yl) {
+                let y = yl as usize;
+                grid[y][2].0 = '┘';
+                grid[y][2].1 = line_color;
+                grid[y][1].0 = '─';
+                grid[y][1].1 = line_color;
             }
         }
-        if used < width {
-            spans.push(Span::styled(
-                " ".repeat(width - used),
-                Style::default().bg(line_bg),
-            ));
+    }
+
+    // Convert grid to Lines. Each cell brings its own bg (track tint or
+    // Reset). On the alignment row we lighten the bg slightly to show the
+    // band without erasing the track stripe.
+    let mut lines = Vec::with_capacity(viewport_h);
+    for (y, row) in grid.iter().enumerate() {
+        let on_align = y == cursor_y;
+        let spans: Vec<Span> = row
+            .iter()
+            .map(|&(c, fg, bg)| {
+                let final_bg = if on_align {
+                    overlay_alignment(bg)
+                } else {
+                    bg
+                };
+                Span::styled(c.to_string(), Style::default().fg(fg).bg(final_bg))
+            })
+            .collect();
+        lines.push(Line::from(spans));
+    }
+    let _ = bg_alignment; // kept for symmetry with overlay_alignment fallback
+    lines
+}
+
+fn overlay_alignment(base: Color) -> Color {
+    match base {
+        Color::Reset => Color::Rgb(40, 50, 70),
+        Color::Rgb(r, g, b) => Color::Rgb(
+            r.saturating_add(20),
+            g.saturating_add(25),
+            b.saturating_add(40),
+        ),
+        c => c,
+    }
+}
+
+#[derive(Debug)]
+struct PathPlan {
+    seg_idx: usize,
+    yl: isize,
+    yr: isize,
+    /// Whether to draw the L-shaped connector line. Anchors at the endpoints
+    /// are drawn regardless; this only controls the middle.
+    line_visible: bool,
+}
+
+/// Returns the segment index whose render-row range contains the alignment
+/// cursor on the anchor side. That segment's path is "of interest" and must
+/// stay drawn even when it conflicts with others.
+fn active_segment_idx(app: &App) -> Option<usize> {
+    let row = match app.anchor_side {
+        AnchorSide::Left => app.left_top + app.cursor_y,
+        AnchorSide::Right => app.right_top + app.cursor_y,
+    };
+    for (i, seg) in app.diff.segments.iter().enumerate() {
+        let (start, end) = match app.anchor_side {
+            AnchorSide::Left => (
+                seg.l_render_start,
+                seg.l_render_start + seg.l_render_count,
+            ),
+            AnchorSide::Right => (
+                seg.r_render_start,
+                seg.r_render_start + seg.r_render_count,
+            ),
+        };
+        if row >= start && row < end {
+            return Some(i);
         }
+    }
+    None
+}
+
+/// Greedily hide the most-conflicting path (one with the highest number of
+/// shared middle-column rows) until no two visible paths overlap. The
+/// `active` segment (if any) is pinned visible — it's the user's selection,
+/// so we keep it and hide whatever blocks it instead.
+///
+/// Iteration is fully deterministic (Vec, not HashMap; ties broken by
+/// distance from `cursor_y` then by path index). Without this, paths with
+/// equal conflict counts would shuffle frame-to-frame and the gutter would
+/// visibly flicker.
+fn resolve_path_conflicts(
+    paths: &mut [PathPlan],
+    viewport_h: usize,
+    cursor_y: usize,
+    active: Option<usize>,
+) {
+    let n = paths.len();
+    loop {
+        let mut row_to_paths: Vec<Vec<usize>> = vec![Vec::new(); viewport_h];
+        for (i, p) in paths.iter().enumerate() {
+            if !p.line_visible {
+                continue;
+            }
+            // Include anchor rows in the claim — corners (`┐`, `└` etc.)
+            // are drawn into the middle column too, so they can collide
+            // with another path's vertical line passing through.
+            let (span_min, span_max) = if p.yl == p.yr {
+                (p.yl, p.yr)
+            } else {
+                (p.yl.min(p.yr), p.yl.max(p.yr))
+            };
+            for row in span_min..=span_max {
+                if row >= 0 && (row as usize) < viewport_h {
+                    row_to_paths[row as usize].push(i);
+                }
+            }
+        }
+
+        let mut conflict_count = vec![0usize; n];
+        let mut any_conflict = false;
+        for paths_at in &row_to_paths {
+            if paths_at.len() > 1 {
+                any_conflict = true;
+                for &p in paths_at {
+                    conflict_count[p] += 1;
+                }
+            }
+        }
+        if !any_conflict {
+            return;
+        }
+
+        // Find the path to hide: highest conflict count first; on a tie,
+        // hide the one whose anchors sit *farther* from the cursor row
+        // (keeps the path the user is looking at). Final tie-break: higher
+        // segment index — anything stable so we don't flip-flop.
+        let cy = cursor_y as isize;
+        let dist = |p: &PathPlan| -> isize {
+            let dl = (p.yl - cy).abs();
+            let dr = (p.yr - cy).abs();
+            dl.min(dr)
+        };
+        let mut target: Option<usize> = None;
+        for i in 0..n {
+            if !paths[i].line_visible {
+                continue;
+            }
+            if Some(paths[i].seg_idx) == active {
+                continue;
+            }
+            if conflict_count[i] == 0 {
+                continue;
+            }
+            target = Some(match target {
+                None => i,
+                Some(j) => {
+                    let key_i = (conflict_count[i], dist(&paths[i]), paths[i].seg_idx);
+                    let key_j = (conflict_count[j], dist(&paths[j]), paths[j].seg_idx);
+                    if key_i > key_j {
+                        i
+                    } else {
+                        j
+                    }
+                }
+            });
+        }
+        match target {
+            Some(p) => paths[p].line_visible = false,
+            None => return,
+        }
+    }
+}
+
+fn render_pane_row(
+    line: Option<&PaneLine>,
+    is_left: bool,
+    is_alignment: bool,
+    text_w: usize,
+    lineno_w: usize,
+) -> (Line<'static>, Line<'static>) {
+    let Some(line) = line else {
+        let bg = if is_alignment {
+            Color::Rgb(40, 50, 70)
+        } else {
+            Color::Reset
+        };
+        let blank = Span::styled(" ".repeat(lineno_w + text_w), Style::default().bg(bg));
+        return (Line::from(blank.clone()), Line::from(blank));
+    };
+    let bg = line_bg(line.kind, is_left, is_alignment);
+
+    let no_text = format!(" {:>width$} ", line.line_no, width = lineno_w.saturating_sub(2));
+    let no_style = Style::default().fg(FG_GUTTER).bg(bg);
+    let no_line = Line::from(Span::styled(no_text, no_style));
+
+    let mut spans: Vec<Span> = Vec::new();
+    let mut used = 0usize;
+    for seg in &line.segments {
+        let style = segment_style(line.kind, seg, is_left, bg);
+        let text = visible_truncate(&seg.text, text_w.saturating_sub(used));
+        used += text.chars().count();
+        spans.push(Span::styled(text, style));
+        if used >= text_w {
+            break;
+        }
+    }
+    if used < text_w {
+        spans.push(Span::styled(
+            " ".repeat(text_w - used),
+            Style::default().bg(bg),
+        ));
     }
     (no_line, Line::from(spans))
 }
 
-/// 2-char bar between the two text panes. Vertically stacked rows of the same
-/// kind merge into a continuous colored stripe — that's the visual cue that the
-/// 3 deletes on the left and 24 inserts on the right are *one* change block.
-fn render_bar(row: &Row, is_cursor: bool) -> Line<'static> {
-    let (lc, rc) = match row.kind {
-        RowKind::Equal => (' ', ' '),
-        RowKind::Insert => (' ', '▐'),
-        RowKind::Delete => ('▌', ' '),
-        RowKind::Replace => ('▌', '▐'),
-    };
-    let l_color = if matches!(row.kind, RowKind::Delete | RowKind::Replace) {
-        Color::Rgb(180, 70, 80)
-    } else {
-        Color::Reset
-    };
-    let r_color = if matches!(row.kind, RowKind::Insert | RowKind::Replace) {
-        Color::Rgb(70, 160, 90)
-    } else {
-        Color::Reset
-    };
-    let bg = if is_cursor {
-        Color::Rgb(40, 50, 70)
-    } else {
-        Color::Reset
-    };
-    Line::from(vec![
-        Span::styled(lc.to_string(), Style::default().fg(l_color).bg(bg)),
-        Span::styled(rc.to_string(), Style::default().fg(r_color).bg(bg)),
-    ])
-}
-
-fn segment_style(
-    kind: RowKind,
-    seg: &Segment,
-    is_left: bool,
-    row_bg: Color,
-    cursor_mod: Modifier,
-) -> Style {
-    let mut s = Style::default().bg(row_bg).add_modifier(cursor_mod);
+fn segment_style(kind: LineKind, seg: &Segment, is_left: bool, row_bg: Color) -> Style {
+    let mut s = Style::default().bg(row_bg);
     s = match (kind, seg.kind) {
-        (RowKind::Replace, SegmentKind::Changed) => {
+        (LineKind::Modified, SegmentKind::Changed) => {
             if is_left {
                 s.bg(HL_DELETE).fg(Color::White)
             } else {
                 s.bg(HL_INSERT).fg(Color::White)
             }
         }
-        (RowKind::Insert, _) => s.fg(Color::Rgb(190, 230, 195)),
-        (RowKind::Delete, _) => s.fg(Color::Rgb(230, 190, 195)),
+        (LineKind::Standalone, _) => {
+            if is_left {
+                s.fg(Color::Rgb(230, 190, 195))
+            } else {
+                s.fg(Color::Rgb(190, 230, 195))
+            }
+        }
         _ => s,
     };
     s
 }
 
-fn row_bg(kind: RowKind, is_left: bool, is_filler: bool) -> Color {
-    if is_filler {
-        return BG_FILLER;
-    }
-    match (kind, is_left) {
-        (RowKind::Equal, _) => Color::Reset,
-        (RowKind::Insert, true) => BG_FILLER,
-        (RowKind::Insert, false) => BG_INSERT_LINE,
-        (RowKind::Delete, true) => BG_DELETE_LINE,
-        (RowKind::Delete, false) => BG_FILLER,
-        (RowKind::Replace, true) => BG_DELETE_LINE,
-        (RowKind::Replace, false) => BG_INSERT_LINE,
+fn line_bg(kind: LineKind, is_left: bool, is_alignment: bool) -> Color {
+    let base = match kind {
+        LineKind::Equal => Color::Reset,
+        LineKind::Standalone => {
+            if is_left {
+                BG_DELETE
+            } else {
+                BG_INSERT
+            }
+        }
+        LineKind::Modified => {
+            if is_left {
+                BG_MOD_LEFT
+            } else {
+                BG_MOD_RIGHT
+            }
+        }
+    };
+    if is_alignment {
+        match base {
+            Color::Reset => Color::Rgb(40, 50, 70),
+            Color::Rgb(r, g, b) => Color::Rgb(
+                r.saturating_add(15),
+                g.saturating_add(20),
+                b.saturating_add(30),
+            ),
+            c => c,
+        }
+    } else {
+        base
     }
 }
 
-fn cursor_overlay(bg: Color) -> Color {
-    match bg {
-        Color::Reset => Color::Rgb(35, 40, 55),
-        Color::Rgb(r, g, b) => Color::Rgb(
-            r.saturating_add(20),
-            g.saturating_add(20),
-            b.saturating_add(35),
-        ),
-        c => c,
-    }
-}
-
-fn lineno_width(rows: &[Row]) -> usize {
-    let max = rows
-        .iter()
-        .filter_map(|r| r.left.line_no.max(r.right.line_no))
-        .max()
-        .unwrap_or(1);
-    let digits = max.to_string().len();
-    digits + 2
+fn lineno_width(lines: &[PaneLine]) -> usize {
+    let max = lines.iter().map(|l| l.line_no).max().unwrap_or(1);
+    max.to_string().len() + 2
 }
 
 fn visible_truncate(s: &str, max: usize) -> String {
@@ -375,6 +680,16 @@ fn border_style(focused: bool) -> Style {
     }
 }
 
+fn side_border_style(is_left: bool, focused: bool) -> Style {
+    let color = match (is_left, focused) {
+        (true, true) => Color::Rgb(220, 100, 110),
+        (true, false) => Color::Rgb(140, 70, 80),
+        (false, true) => Color::Rgb(110, 200, 130),
+        (false, false) => Color::Rgb(70, 130, 90),
+    };
+    Style::default().fg(color)
+}
+
 fn status_color(status: &str) -> Color {
     let c = status.chars().next().unwrap_or(' ');
     match c {
@@ -387,11 +702,21 @@ fn status_color(status: &str) -> Color {
     }
 }
 
+fn short_label(s: &str) -> String {
+    let max = 32;
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let tail: String = s.chars().rev().take(max - 1).collect::<Vec<_>>().into_iter().rev().collect();
+        format!("…{}", tail)
+    }
+}
+
 fn render_status(f: &mut Frame, area: Rect, app: &App) {
     let hint = if app.show_help {
         "press ? to close help"
     } else {
-        "j/k move  J/K hunk  n/p file  Tab focus  click/wheel mouse  r reload  ? help  q quit"
+        "j/k scroll  J/K hunk  click select+snap  =  resync  n/p file  Tab focus  ? help  q quit"
     };
     let line = Line::from(vec![
         Span::styled(
@@ -408,7 +733,7 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_help(f: &mut Frame, area: Rect) {
-    let w = 60u16.min(area.width.saturating_sub(4));
+    let w = 64u16.min(area.width.saturating_sub(4));
     let h = 18u16.min(area.height.saturating_sub(4));
     let x = area.x + (area.width - w) / 2;
     let y = area.y + (area.height - h) / 2;
@@ -420,15 +745,15 @@ fn render_help(f: &mut Frame, area: Rect) {
             Style::default().add_modifier(Modifier::BOLD),
         )),
         Line::raw(""),
-        Line::raw("  j / k       move cursor"),
-        Line::raw("  J / K       next / prev hunk"),
+        Line::raw("  j / k       scroll both panes 1:1"),
+        Line::raw("  J / K       jump to next / prev change hunk"),
         Line::raw("  ctrl-d/u    half-page down / up"),
-        Line::raw("  g / G       top / bottom"),
+        Line::raw("  =           re-snap non-anchor pane to alignment row"),
+        Line::raw("  click       select that line; the *other* pane snaps"),
+        Line::raw("  wheel       scroll pane under pointer"),
         Line::raw("  n / p       next / prev file"),
-        Line::raw("  Tab         toggle focus (files / diff)"),
-        Line::raw("  click       focus & select row"),
-        Line::raw("  wheel       scroll under pointer"),
-        Line::raw("  r           reload manually (auto-reload runs always)"),
+        Line::raw("  Tab         toggle focus (Files / Diff)"),
+        Line::raw("  r           manual reload"),
         Line::raw("  ? / esc     toggle / close this help"),
         Line::raw("  q          quit"),
     ];
