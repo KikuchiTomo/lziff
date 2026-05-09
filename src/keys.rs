@@ -1,5 +1,6 @@
 use crate::app::{App, Focus};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
+use crate::config::Action as ConfigAction;
+use crossterm::event::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
 
 pub enum Action {
     Continue,
@@ -7,46 +8,61 @@ pub enum Action {
 }
 
 pub fn handle_key(app: &mut App, key: KeyEvent) -> Action {
+    let mods = key.modifiers
+        & (crossterm::event::KeyModifiers::SHIFT
+            | crossterm::event::KeyModifiers::CONTROL
+            | crossterm::event::KeyModifiers::ALT);
+    let cfg_action = app.config.keymap.lookup(key.code, mods);
+
     if app.show_help {
-        match key.code {
-            KeyCode::Char('?') | KeyCode::Esc | KeyCode::Char('q') => app.show_help = false,
+        match cfg_action {
+            Some(ConfigAction::ToggleHelp)
+            | Some(ConfigAction::CloseHelp)
+            | Some(ConfigAction::Quit) => app.show_help = false,
             _ => {}
         }
         return Action::Continue;
     }
 
-    match (key.code, key.modifiers) {
-        (KeyCode::Char('q'), _) => return Action::Quit,
-        (KeyCode::Char('?'), _) => app.show_help = true,
-        (KeyCode::Tab, _) => app.toggle_focus(),
-        (KeyCode::Char('r'), _) => app.reload_entries(),
-        (KeyCode::Char('n'), _) => app.select_next(),
-        (KeyCode::Char('p'), _) => app.select_prev(),
-        (KeyCode::Char('='), _) => app.resnap(),
+    let Some(action) = cfg_action else {
+        // Fall through: nothing bound; ignore.
+        if matches!(key.code, KeyCode::Enter) && matches!(app.focus, Focus::Files) {
+            app.focus = Focus::Diff;
+        }
+        return Action::Continue;
+    };
 
-        (KeyCode::Char('j') | KeyCode::Down, _) => app.cursor_down(1),
-        (KeyCode::Char('k') | KeyCode::Up, _) => app.cursor_up(1),
-        (KeyCode::Char('J'), _) => app.next_hunk(),
-        (KeyCode::Char('K'), _) => app.prev_hunk(),
-        (KeyCode::Char('d'), KeyModifiers::CONTROL) => app.cursor_down(15),
-        (KeyCode::Char('u'), KeyModifiers::CONTROL) => app.cursor_up(15),
-        (KeyCode::Char('g'), _) => {
+    let half_step = app.config.behavior.half_page_step;
+    match action {
+        ConfigAction::Quit => return Action::Quit,
+        ConfigAction::ToggleHelp => app.show_help = true,
+        ConfigAction::CloseHelp => {} // only meaningful while help is open
+        ConfigAction::ToggleFocus => app.toggle_focus(),
+        ConfigAction::Reload => app.reload_entries(),
+        ConfigAction::NextFile => app.select_next(),
+        ConfigAction::PrevFile => app.select_prev(),
+        ConfigAction::Resnap => app.resnap(),
+        ConfigAction::ScrollDown => app.cursor_down(1),
+        ConfigAction::ScrollUp => app.cursor_up(1),
+        ConfigAction::NextHunk => app.next_hunk(),
+        ConfigAction::PrevHunk => app.prev_hunk(),
+        ConfigAction::HalfPageDown => app.cursor_down(half_step),
+        ConfigAction::HalfPageUp => app.cursor_up(half_step),
+        ConfigAction::Top => {
             app.left_top = 0;
             app.right_top = 0;
         }
-        (KeyCode::Char('G'), _) => {
+        ConfigAction::Bottom => {
             app.left_top = app.diff.left_render.len().saturating_sub(1);
             app.right_top = app.diff.right_render.len().saturating_sub(1);
         }
-
-        (KeyCode::Enter, _) => {
+        ConfigAction::EnterDiff => {
             if matches!(app.focus, Focus::Files) {
                 app.focus = Focus::Diff;
             }
         }
-        (KeyCode::Left | KeyCode::Char('h'), _) => app.focus = Focus::Files,
-        (KeyCode::Right | KeyCode::Char('l'), _) => app.focus = Focus::Diff,
-        _ => {}
+        ConfigAction::FocusFiles => app.focus = Focus::Files,
+        ConfigAction::FocusDiff => app.focus = Focus::Diff,
     }
     Action::Continue
 }

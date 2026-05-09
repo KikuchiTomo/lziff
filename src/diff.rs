@@ -221,7 +221,7 @@ impl Diff {
 }
 
 impl Diff {
-    pub fn compute(left_text: &str, right_text: &str) -> Self {
+    pub fn compute(left_text: &str, right_text: &str, similarity_threshold: f32) -> Self {
         let left_lines: Vec<&str> = split_lines(left_text);
         let right_lines: Vec<&str> = split_lines(right_text);
 
@@ -256,6 +256,7 @@ impl Diff {
                                 &mut pending_ins,
                                 ch_l_start,
                                 ch_r_start,
+                                similarity_threshold,
                             );
                             in_change = false;
                             eq_l_start = out.left.len();
@@ -338,6 +339,7 @@ impl Diff {
                 &mut pending_ins,
                 ch_l_start,
                 ch_r_start,
+                similarity_threshold,
             );
         } else if eq_run > 0 {
             out.segments.push(AlignSegment {
@@ -412,6 +414,7 @@ fn flush_change_segment(
     ins: &mut Vec<(usize, &str)>,
     l_start: usize,
     r_start: usize,
+    similarity_threshold: f32,
 ) {
     let l_count = dels.len();
     let r_count = ins.len();
@@ -422,7 +425,7 @@ fn flush_change_segment(
     for i in 0..pair_count {
         let (lno, l_text) = dels[i];
         let (rno, r_text) = ins[i];
-        let (lsegs, rsegs) = if similarity(l_text, r_text) >= 0.30 {
+        let (lsegs, rsegs) = if similarity(l_text, r_text) >= similarity_threshold {
             word_diff(l_text, r_text)
         } else {
             (
@@ -623,7 +626,7 @@ mod tests {
 
     #[test]
     fn equal_inputs_produce_only_equal_lines() {
-        let d = Diff::compute("a\nb\nc\n", "a\nb\nc\n");
+        let d = Diff::compute("a\nb\nc\n", "a\nb\nc\n", 0.30);
         assert_eq!(d.left.len(), 3);
         assert_eq!(d.right.len(), 3);
         assert!(d.left.iter().all(|l| l.kind == LineKind::Equal));
@@ -635,14 +638,14 @@ mod tests {
     #[test]
     fn left_and_right_have_independent_lengths() {
         // 1 delete vs 4 inserts: left has 3 lines, right has 6 — no filler.
-        let d = Diff::compute("eq\nold\ntail\n", "eq\nn1\nn2\nn3\nn4\ntail\n");
+        let d = Diff::compute("eq\nold\ntail\n", "eq\nn1\nn2\nn3\nn4\ntail\n", 0.30);
         assert_eq!(d.left.len(), 3);
         assert_eq!(d.right.len(), 6);
     }
 
     #[test]
     fn modified_pair_carries_word_diff() {
-        let d = Diff::compute("hello world\n", "hello brave world\n");
+        let d = Diff::compute("hello world\n", "hello brave world\n", 0.30);
         assert!(d
             .left
             .iter()
@@ -657,7 +660,7 @@ mod tests {
 
     #[test]
     fn standalone_inserts_have_no_pair() {
-        let d = Diff::compute("a\nc\n", "a\nb\nc\n");
+        let d = Diff::compute("a\nc\n", "a\nb\nc\n", 0.30);
         let standalone: Vec<_> = d
             .right
             .iter()
@@ -679,7 +682,7 @@ mod tests {
             right.push_str(&format!("R{i}\n"));
         }
         right.push_str("eq_bot\n");
-        let d = Diff::compute(&left, &right);
+        let d = Diff::compute(&left, &right, 0.30);
         let change = d.segments.iter().find(|s| s.is_change).unwrap();
         assert_eq!(change.l_count, 3);
         assert_eq!(change.r_count, 24);
@@ -714,7 +717,7 @@ mod tests {
 
     #[test]
     fn equal_segment_advances_one_to_one() {
-        let d = Diff::compute("a\nb\nc\n", "a\nb\nc\n");
+        let d = Diff::compute("a\nb\nc\n", "a\nb\nc\n", 0.30);
         let (l0, r0) = d.map(0);
         let (l1, r1) = d.map(1);
         let (l2, r2) = d.map(2);

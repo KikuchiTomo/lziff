@@ -1,4 +1,6 @@
+use crate::config::Config;
 use crate::diff::{Diff, LineKind};
+use crate::i18n::Strings;
 use crate::source::{DiffPayload, DiffSource, Entry};
 use anyhow::Result;
 use ratatui::layout::Rect;
@@ -46,11 +48,13 @@ pub struct App {
     pub status: String,
     pub layout: LayoutCache,
     pub show_files_panel: bool,
+    pub config: Config,
+    pub strings: Strings,
     last_signature: u64,
 }
 
 impl App {
-    pub fn new(source: Box<dyn DiffSource>) -> Result<Self> {
+    pub fn new(source: Box<dyn DiffSource>, config: Config, strings: Strings) -> Result<Self> {
         let entries = source.list()?;
         let signature = source.signature(entries.first().map(|e| e.id.as_str()));
         let show_files = source.show_files_panel();
@@ -69,6 +73,8 @@ impl App {
             status: String::new(),
             layout: LayoutCache::default(),
             show_files_panel: show_files,
+            config,
+            strings,
             last_signature: signature,
         };
         app.reload_diff();
@@ -119,7 +125,11 @@ impl App {
         };
         match self.source.load(&entry.id) {
             Ok(payload) => {
-                self.diff = Diff::compute(&payload.left, &payload.right);
+                self.diff = Diff::compute(
+                    &payload.left,
+                    &payload.right,
+                    self.config.behavior.similarity_threshold,
+                );
                 self.payload = Some(payload);
             }
             Err(e) => {
@@ -138,7 +148,7 @@ impl App {
         }
         self.last_signature = sig;
         self.reload_entries();
-        self.status = "auto-reloaded".into();
+        self.status = self.strings.status_auto_reloaded.clone();
     }
 
     pub fn select_next(&mut self) {
@@ -391,9 +401,9 @@ impl App {
     }
 
     pub fn handle_scroll(&mut self, x: u16, y: u16, down: bool) {
-        const STEP: usize = 3;
+        let step = self.config.behavior.scroll_step;
         if rect_contains(self.layout.files_inner, x, y) {
-            for _ in 0..STEP {
+            for _ in 0..step {
                 if down {
                     self.select_next();
                 } else {
@@ -404,9 +414,9 @@ impl App {
             || rect_contains(self.layout.diff_right_inner, x, y)
         {
             if down {
-                self.cursor_down(STEP);
+                self.cursor_down(step);
             } else {
-                self.cursor_up(STEP);
+                self.cursor_up(step);
             }
         }
     }

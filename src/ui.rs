@@ -1,4 +1,5 @@
 use crate::app::{AnchorSide, App, Focus, LayoutCache};
+use crate::config::Theme;
 use crate::diff::{LineKind, PaneLine, Segment, SegmentKind};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -7,22 +8,6 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
     Frame,
 };
-
-const BG_DELETE: Color = Color::Rgb(48, 22, 26);
-const BG_INSERT: Color = Color::Rgb(20, 44, 26);
-const BG_MOD_LEFT: Color = Color::Rgb(48, 22, 26);
-const BG_MOD_RIGHT: Color = Color::Rgb(20, 44, 26);
-const HL_DELETE: Color = Color::Rgb(150, 60, 70);
-const HL_INSERT: Color = Color::Rgb(50, 130, 70);
-const FG_GUTTER: Color = Color::Rgb(120, 120, 120);
-
-const ANCHOR_BRIGHT: Color = Color::Rgb(245, 245, 250);
-const ANCHOR_SOFT: Color = Color::Rgb(190, 195, 210);
-/// Background tints used for the side bars in the ribbon. We fill these
-/// behind the anchor circles instead of drawing a `│` track because the
-/// vertical line collides with the circle glyphs and is hard to read.
-const TRACK_BG_LEFT: Color = Color::Rgb(60, 28, 32);
-const TRACK_BG_RIGHT: Color = Color::Rgb(26, 50, 32);
 
 pub fn render(f: &mut Frame, app: &mut App) {
     let area = f.area();
@@ -41,7 +26,10 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.show_files_panel {
         let body = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(28), Constraint::Min(20)])
+            .constraints([
+                Constraint::Percentage(app.config.layout.files_panel_width_pct),
+                Constraint::Min(20),
+            ])
             .split(chunks[1]);
         render_files(f, body[0], app, &mut layout);
         render_diff(f, body[1], app, &mut layout);
@@ -53,11 +41,12 @@ pub fn render(f: &mut Frame, app: &mut App) {
     render_status(f, chunks[2], app);
 
     if app.show_help {
-        render_help(f, area);
+        render_help(f, area, app);
     }
 }
 
 fn render_title(f: &mut Frame, area: Rect, app: &App) {
+    let theme = &app.config.theme;
     let (l, r) = app.header_label();
     let (a, d, m) = app.change_summary();
     let title = Line::from(vec![
@@ -65,13 +54,13 @@ fn render_title(f: &mut Frame, area: Rect, app: &App) {
             " lziff ",
             Style::default()
                 .add_modifier(Modifier::BOLD)
-                .bg(Color::Rgb(60, 90, 140))
-                .fg(Color::White),
+                .bg(theme.title_bg)
+                .fg(theme.title_fg),
         ),
         Span::raw(" "),
-        Span::styled(l, Style::default().fg(Color::Rgb(200, 120, 120))),
+        Span::styled(l, Style::default().fg(theme.title_old)),
         Span::raw("  ↔  "),
-        Span::styled(r, Style::default().fg(Color::Rgb(120, 200, 140))),
+        Span::styled(r, Style::default().fg(theme.title_new)),
         Span::raw("   "),
         Span::styled(format!("+{a}"), Style::default().fg(Color::Green)),
         Span::raw(" "),
@@ -83,11 +72,12 @@ fn render_title(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_files(f: &mut Frame, area: Rect, app: &App, layout: &mut LayoutCache) {
+    let theme = &app.config.theme;
     let focused = matches!(app.focus, Focus::Files);
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Files ")
-        .border_style(border_style(focused));
+        .title(app.strings.title_files_panel.clone())
+        .border_style(border_style(theme, focused));
     layout.files_inner = block.inner(area);
 
     let items: Vec<ListItem> = app
@@ -107,9 +97,9 @@ fn render_files(f: &mut Frame, area: Rect, app: &App, layout: &mut LayoutCache) 
         .highlight_style(
             Style::default()
                 .bg(if focused {
-                    Color::Rgb(50, 70, 100)
+                    theme.list_focus_bg
                 } else {
-                    Color::Rgb(50, 50, 50)
+                    theme.list_dim_bg
                 })
                 .add_modifier(Modifier::BOLD),
         )
@@ -123,6 +113,7 @@ fn render_files(f: &mut Frame, area: Rect, app: &App, layout: &mut LayoutCache) 
 }
 
 fn render_diff(f: &mut Frame, area: Rect, app: &App, layout: &mut LayoutCache) {
+    let theme = &app.config.theme;
     let focused = matches!(app.focus, Focus::Diff);
 
     let (l_label, r_label) = app.header_label();
@@ -130,19 +121,27 @@ fn render_diff(f: &mut Frame, area: Rect, app: &App, layout: &mut LayoutCache) {
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Min(10),
-            Constraint::Length(5),
+            Constraint::Length(app.config.layout.ribbon_width),
             Constraint::Min(10),
         ])
         .split(area);
 
     let l_block = Block::default()
         .borders(Borders::ALL)
-        .title(format!(" [Old] {} ", short_label(&l_label)))
-        .border_style(side_border_style(true, focused));
+        .title(format!(
+            "{}{}",
+            app.strings.title_old_prefix,
+            short_label(&l_label)
+        ))
+        .border_style(side_border_style(theme, true, focused));
     let r_block = Block::default()
         .borders(Borders::ALL)
-        .title(format!(" [New] {} ", short_label(&r_label)))
-        .border_style(side_border_style(false, focused));
+        .title(format!(
+            "{}{}",
+            app.strings.title_new_prefix,
+            short_label(&r_label)
+        ))
+        .border_style(side_border_style(theme, false, focused));
 
     let l_inner = l_block.inner(cols[0]);
     let r_inner = r_block.inner(cols[2]);
@@ -200,8 +199,8 @@ fn render_diff(f: &mut Frame, area: Rect, app: &App, layout: &mut LayoutCache) {
             .and_then(|opt| opt.as_ref().and_then(|&i| app.diff.right.get(i)));
         let is_alignment = y == cursor_y;
 
-        let (lno, ltxt) = render_pane_row(l_line, true, is_alignment, l_text_w, lineno_w_l);
-        let (rno, rtxt) = render_pane_row(r_line, false, is_alignment, r_text_w, lineno_w_r);
+        let (lno, ltxt) = render_pane_row(theme, l_line, true, is_alignment, l_text_w, lineno_w_l);
+        let (rno, rtxt) = render_pane_row(theme, r_line, false, is_alignment, r_text_w, lineno_w_r);
         l_no_lines.push(lno);
         l_text_lines.push(ltxt);
         r_no_lines.push(rno);
@@ -232,11 +231,13 @@ fn render_diff(f: &mut Frame, area: Rect, app: &App, layout: &mut LayoutCache) {
 /// - Anchors that sit on the cursor row are drawn filled (`●`) and bright
 ///   white. Others are hollow (`○`) and a softer white.
 fn build_ribbon_grid(app: &App, viewport_h: usize, cursor_y: usize) -> Vec<Line<'static>> {
-    let cols_n = 5usize;
+    let theme = &app.config.theme;
+    // Internal grid is fixed at 5 columns: anchor / horizontal / vertical /
+    // horizontal / anchor. `LayoutConfig::ribbon_width` controls the *cell*
+    // width on screen — extra width pads, smaller width crops.
+    const COLS_N: usize = 5;
     let mut grid: Vec<Vec<(char, Color, Color)>> =
-        vec![vec![(' ', Color::Reset, Color::Reset); cols_n]; viewport_h];
-
-    let bg_alignment = Color::Rgb(40, 50, 70);
+        vec![vec![(' ', Color::Reset, Color::Reset); COLS_N]; viewport_h];
 
     // Tracks for change rows: we *just* tint the background of cols 0 and 4
     // so the side bars read as continuous colored stripes. Anchors land on
@@ -258,10 +259,10 @@ fn build_ribbon_grid(app: &App, viewport_h: usize, cursor_y: usize) -> Vec<Line<
         let l_phantom = matches!(app.diff.left_render.get(app.left_top + y), Some(None));
         let r_phantom = matches!(app.diff.right_render.get(app.right_top + y), Some(None));
         if l_change || l_phantom {
-            row[0].2 = TRACK_BG_LEFT;
+            row[0].2 = theme.track_bg_left;
         }
         if r_change || r_phantom {
-            row[4].2 = TRACK_BG_RIGHT;
+            row[4].2 = theme.track_bg_right;
         }
     }
 
@@ -303,26 +304,31 @@ fn build_ribbon_grid(app: &App, viewport_h: usize, cursor_y: usize) -> Vec<Line<
 
         let (l_dim, l_bright, r_dim, r_bright) = if seg.is_change {
             (
-                Color::Rgb(170, 80, 90),
-                Color::Rgb(230, 110, 120),
-                Color::Rgb(80, 160, 100),
-                Color::Rgb(120, 210, 140),
+                theme.change_anchor_dim_left,
+                theme.change_anchor_bright_left,
+                theme.change_anchor_dim_right,
+                theme.change_anchor_bright_right,
             )
         } else {
-            (ANCHOR_SOFT, ANCHOR_BRIGHT, ANCHOR_SOFT, ANCHOR_BRIGHT)
+            (
+                theme.anchor_soft,
+                theme.anchor_bright,
+                theme.anchor_soft,
+                theme.anchor_bright,
+            )
         };
         let l_color = if l_filled { l_bright } else { l_dim };
         let r_color = if r_filled { r_bright } else { r_dim };
         let line_color = if seg.is_change {
             if l_filled || r_filled {
-                Color::Rgb(190, 170, 120)
+                theme.change_line_bright
             } else {
-                Color::Rgb(140, 130, 90)
+                theme.change_line_dim
             }
         } else if l_filled || r_filled {
-            ANCHOR_BRIGHT
+            theme.line_bright
         } else {
-            ANCHOR_SOFT
+            theme.line_dim
         };
 
         // Anchors are *always* drawn — only the connector line gets hidden
@@ -409,7 +415,7 @@ fn build_ribbon_grid(app: &App, viewport_h: usize, cursor_y: usize) -> Vec<Line<
             .iter()
             .map(|&(c, fg, bg)| {
                 let final_bg = if on_align {
-                    overlay_alignment(bg)
+                    overlay_alignment(bg, theme)
                 } else {
                     bg
                 };
@@ -418,13 +424,12 @@ fn build_ribbon_grid(app: &App, viewport_h: usize, cursor_y: usize) -> Vec<Line<
             .collect();
         lines.push(Line::from(spans));
     }
-    let _ = bg_alignment; // kept for symmetry with overlay_alignment fallback
     lines
 }
 
-fn overlay_alignment(base: Color) -> Color {
+fn overlay_alignment(base: Color, theme: &Theme) -> Color {
     match base {
-        Color::Reset => Color::Rgb(40, 50, 70),
+        Color::Reset => theme.alignment_overlay,
         Color::Rgb(r, g, b) => Color::Rgb(
             r.saturating_add(20),
             g.saturating_add(25),
@@ -563,6 +568,7 @@ fn resolve_path_conflicts(
 }
 
 fn render_pane_row(
+    theme: &Theme,
     line: Option<&PaneLine>,
     is_left: bool,
     is_alignment: bool,
@@ -571,23 +577,23 @@ fn render_pane_row(
 ) -> (Line<'static>, Line<'static>) {
     let Some(line) = line else {
         let bg = if is_alignment {
-            Color::Rgb(40, 50, 70)
+            theme.alignment_overlay
         } else {
             Color::Reset
         };
         let blank = Span::styled(" ".repeat(lineno_w + text_w), Style::default().bg(bg));
         return (Line::from(blank.clone()), Line::from(blank));
     };
-    let bg = line_bg(line.kind, is_left, is_alignment);
+    let bg = line_bg(theme, line.kind, is_left, is_alignment);
 
     let no_text = format!(" {:>width$} ", line.line_no, width = lineno_w.saturating_sub(2));
-    let no_style = Style::default().fg(FG_GUTTER).bg(bg);
+    let no_style = Style::default().fg(theme.fg_gutter).bg(bg);
     let no_line = Line::from(Span::styled(no_text, no_style));
 
     let mut spans: Vec<Span> = Vec::new();
     let mut used = 0usize;
     for seg in &line.segments {
-        let style = segment_style(line.kind, seg, is_left, bg);
+        let style = segment_style(theme, line.kind, seg, is_left, bg);
         let text = visible_truncate(&seg.text, text_w.saturating_sub(used));
         used += text.chars().count();
         spans.push(Span::styled(text, style));
@@ -604,21 +610,21 @@ fn render_pane_row(
     (no_line, Line::from(spans))
 }
 
-fn segment_style(kind: LineKind, seg: &Segment, is_left: bool, row_bg: Color) -> Style {
+fn segment_style(theme: &Theme, kind: LineKind, seg: &Segment, is_left: bool, row_bg: Color) -> Style {
     let mut s = Style::default().bg(row_bg);
     s = match (kind, seg.kind) {
         (LineKind::Modified, SegmentKind::Changed) => {
             if is_left {
-                s.bg(HL_DELETE).fg(Color::White)
+                s.bg(theme.hl_delete).fg(Color::White)
             } else {
-                s.bg(HL_INSERT).fg(Color::White)
+                s.bg(theme.hl_insert).fg(Color::White)
             }
         }
         (LineKind::Standalone, _) => {
             if is_left {
-                s.fg(Color::Rgb(230, 190, 195))
+                s.fg(theme.fg_standalone_left)
             } else {
-                s.fg(Color::Rgb(190, 230, 195))
+                s.fg(theme.fg_standalone_right)
             }
         }
         _ => s,
@@ -626,27 +632,27 @@ fn segment_style(kind: LineKind, seg: &Segment, is_left: bool, row_bg: Color) ->
     s
 }
 
-fn line_bg(kind: LineKind, is_left: bool, is_alignment: bool) -> Color {
+fn line_bg(theme: &Theme, kind: LineKind, is_left: bool, is_alignment: bool) -> Color {
     let base = match kind {
         LineKind::Equal => Color::Reset,
         LineKind::Standalone => {
             if is_left {
-                BG_DELETE
+                theme.bg_delete
             } else {
-                BG_INSERT
+                theme.bg_insert
             }
         }
         LineKind::Modified => {
             if is_left {
-                BG_MOD_LEFT
+                theme.bg_mod_left
             } else {
-                BG_MOD_RIGHT
+                theme.bg_mod_right
             }
         }
     };
     if is_alignment {
         match base {
-            Color::Reset => Color::Rgb(40, 50, 70),
+            Color::Reset => theme.alignment_overlay,
             Color::Rgb(r, g, b) => Color::Rgb(
                 r.saturating_add(15),
                 g.saturating_add(20),
@@ -672,20 +678,20 @@ fn visible_truncate(s: &str, max: usize) -> String {
     }
 }
 
-fn border_style(focused: bool) -> Style {
+fn border_style(theme: &Theme, focused: bool) -> Style {
     if focused {
-        Style::default().fg(Color::Rgb(120, 160, 220))
+        Style::default().fg(theme.diff_focus)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(theme.diff_dim)
     }
 }
 
-fn side_border_style(is_left: bool, focused: bool) -> Style {
+fn side_border_style(theme: &Theme, is_left: bool, focused: bool) -> Style {
     let color = match (is_left, focused) {
-        (true, true) => Color::Rgb(220, 100, 110),
-        (true, false) => Color::Rgb(140, 70, 80),
-        (false, true) => Color::Rgb(110, 200, 130),
-        (false, false) => Color::Rgb(70, 130, 90),
+        (true, true) => theme.border_left_focus,
+        (true, false) => theme.border_left_dim,
+        (false, true) => theme.border_right_focus,
+        (false, false) => theme.border_right_dim,
     };
     Style::default().fg(color)
 }
@@ -714,9 +720,9 @@ fn short_label(s: &str) -> String {
 
 fn render_status(f: &mut Frame, area: Rect, app: &App) {
     let hint = if app.show_help {
-        "press ? to close help"
+        app.strings.status_hint_help_open.clone()
     } else {
-        "j/k scroll  J/K hunk  click select+snap  =  resync  n/p file  Tab focus  ? help  q quit"
+        app.strings.status_hint_default.clone()
     };
     let line = Line::from(vec![
         Span::styled(
@@ -732,36 +738,38 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(Paragraph::new(line), area);
 }
 
-fn render_help(f: &mut Frame, area: Rect) {
-    let w = 64u16.min(area.width.saturating_sub(4));
-    let h = 18u16.min(area.height.saturating_sub(4));
+fn render_help(f: &mut Frame, area: Rect, app: &App) {
+    let theme = &app.config.theme;
+    // Sized to the longest help line + padding, with a sensible cap.
+    let body_w = app
+        .strings
+        .help_lines
+        .iter()
+        .map(|s| s.chars().count())
+        .max()
+        .unwrap_or(40)
+        + 4;
+    let w = (body_w as u16).clamp(40, 80).min(area.width.saturating_sub(4));
+    let body_h = app.strings.help_lines.len() as u16 + 4;
+    let h = body_h.min(area.height.saturating_sub(4));
     let x = area.x + (area.width - w) / 2;
     let y = area.y + (area.height - h) / 2;
     let r = Rect::new(x, y, w, h);
     f.render_widget(Clear, r);
-    let lines = vec![
-        Line::from(Span::styled(
-            "  Keys",
-            Style::default().add_modifier(Modifier::BOLD),
-        )),
-        Line::raw(""),
-        Line::raw("  j / k       scroll both panes 1:1"),
-        Line::raw("  J / K       jump to next / prev change hunk"),
-        Line::raw("  ctrl-d/u    half-page down / up"),
-        Line::raw("  =           re-snap non-anchor pane to alignment row"),
-        Line::raw("  click       select that line; the *other* pane snaps"),
-        Line::raw("  wheel       scroll pane under pointer"),
-        Line::raw("  n / p       next / prev file"),
-        Line::raw("  Tab         toggle focus (Files / Diff)"),
-        Line::raw("  r           manual reload"),
-        Line::raw("  ? / esc     toggle / close this help"),
-        Line::raw("  q          quit"),
-    ];
+    let mut lines: Vec<Line> = Vec::with_capacity(2 + app.strings.help_lines.len());
+    lines.push(Line::from(Span::styled(
+        app.strings.help_header.clone(),
+        Style::default().add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::raw(""));
+    for s in &app.strings.help_lines {
+        lines.push(Line::raw(s.clone()));
+    }
     let p = Paragraph::new(lines).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" Help ")
-            .border_style(Style::default().fg(Color::Rgb(120, 160, 220))),
+            .title(app.strings.title_help.clone())
+            .border_style(Style::default().fg(theme.diff_focus)),
     );
     f.render_widget(p, r);
 }

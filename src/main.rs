@@ -1,5 +1,7 @@
 mod app;
+mod config;
 mod diff;
+mod i18n;
 mod keys;
 mod source;
 mod ui;
@@ -41,7 +43,9 @@ fn main() -> Result<()> {
         _ => anyhow::bail!("expected 0 args (git mode) or 2 args (file pair)"),
     };
 
-    let mut app = App::new(source)?;
+    let cfg = config::Config::load();
+    let strings = i18n::Strings::for_lang(&cfg.i18n.lang);
+    let mut app = App::new(source, cfg, strings)?;
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -66,7 +70,7 @@ fn run_loop<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     app: &mut App,
 ) -> Result<()> {
-    let tick = Duration::from_millis(250);
+    let tick = Duration::from_millis(app.config.behavior.tick_ms);
     let mut last_tick = Instant::now();
     loop {
         terminal.draw(|f| ui::render(f, app))?;
