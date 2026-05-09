@@ -1,27 +1,23 @@
-[package]
-name = "lziff"
+[workspace]
+resolver = "2"
+members = [
+    "crates/lziff",
+    "crates/review-protocol",
+    "crates/lziff-github",
+]
+
+[workspace.package]
 version = "0.1.0-rc.1"
 edition = "2021"
 license = "MIT"
-description = "A cross-platform TUI diff & review tool with JetBrains-style snap-aligned side-by-side diffs"
 repository = "https://github.com/KikuchiTomo/lziff"
 homepage = "https://github.com/KikuchiTomo/lziff"
 
-[[bin]]
-name = "lziff"
-path = "src/main.rs"
-
-[dependencies]
-ratatui = "0.29"
-crossterm = "0.28"
-similar = "2.6"
+[workspace.dependencies]
 anyhow = "1"
-clap = { version = "4.5", features = ["derive"] }
-unicode-width = "0.2"
-unicode-segmentation = "1.12"
 serde = { version = "1", features = ["derive"] }
-toml = "0.8"
-dirs = "5"
+review-protocol = { path = "crates/review-protocol", version = "0.1.0-rc.1" }
+lziff-github = { path = "crates/lziff-github", version = "0.1.0-rc.1" }
 
 [profile.release]
 lto = "thin"

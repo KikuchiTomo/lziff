@@ -405,12 +405,24 @@ dependencies = [
  "clap",
  "crossterm",
  "dirs",
+ "lziff-github",
  "ratatui",
+ "review-protocol",
  "serde",
  "similar",
  "toml",
  "unicode-segmentation",
  "unicode-width 0.2.0",
+]
+
+[[package]]
+name = "lziff-github"
+version = "0.1.0-rc.1"
+dependencies = [
+ "anyhow",
+ "review-protocol",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -532,6 +544,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "review-protocol"
+version = "0.1.0-rc.1"
+dependencies = [
+ "anyhow",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "rustix"
 version = "0.38.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -590,6 +611,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "serde_json"
+version = "1.0.149"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
+dependencies = [
+ "itoa",
+ "memchr",
+ "serde",
+ "serde_core",
+ "zmij",
 ]
 
 [[package]]
@@ -981,3 +1015,9 @@ checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
 dependencies = [
  "memchr",
 ]
+
+[[package]]
+name = "zmij"
+version = "1.0.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"

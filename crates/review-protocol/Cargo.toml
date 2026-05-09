@@ -1,0 +1,13 @@
+[package]
+name = "review-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Plugin protocol for lziff review providers (GitHub, GitLab, ...)."
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+thiserror = "1"

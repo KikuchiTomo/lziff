@@ -3,6 +3,7 @@ mod config;
 mod diff;
 mod i18n;
 mod keys;
+mod review;
 mod source;
 mod ui;
 

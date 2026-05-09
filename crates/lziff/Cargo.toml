@@ -1,0 +1,37 @@
+[package]
+name = "lziff"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "A cross-platform TUI diff & review tool with JetBrains-style snap-aligned side-by-side diffs"
+
+[[bin]]
+name = "lziff"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+similar = "2.6"
+anyhow = { workspace = true }
+clap = { version = "4.5", features = ["derive"] }
+unicode-width = "0.2"
+unicode-segmentation = "1.12"
+serde = { workspace = true }
+toml = "0.8"
+dirs = "5"
+review-protocol = { workspace = true }
+
+# `lziff-github` is the *only* link between the main crate and the
+# GitHub-specific implementation. It's pulled in behind a feature so the
+# binary can be compiled without the GitHub backend if a future build
+# wants to e.g. ship a vendor-free variant. The body of the lziff crate
+# never imports anything from `lziff_github` directly — only `main.rs`
+# does the wireup, and only via the public `make_provider()` factory.
+lziff-github = { workspace = true, optional = true }
+
+[features]
+default = ["github"]
+github = ["dep:lziff-github"]
