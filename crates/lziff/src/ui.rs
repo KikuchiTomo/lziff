@@ -979,7 +979,14 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
 
 fn render_help(f: &mut Frame, area: Rect, app: &App) {
     let theme = &app.config.theme;
-    let sections = &app.strings.help_sections;
+    // The Review section is appended only when the host is actually in
+    // review mode — otherwise it lists keys that wouldn't fire.
+    let mut all_sections: Vec<&crate::i18n::HelpSection> =
+        app.strings.help_sections.iter().collect();
+    if app.review.is_some() {
+        all_sections.extend(app.strings.help_review_sections.iter());
+    }
+    let sections: &[&crate::i18n::HelpSection] = &all_sections;
     if sections.is_empty() {
         return;
     }

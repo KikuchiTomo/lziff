@@ -34,6 +34,10 @@ pub struct Strings {
     pub status_hint_default: String,
     pub status_hint_help_open: String,
     pub help_sections: Vec<HelpSection>,
+    /// Sections appended only when the host is running in `--review`
+    /// mode. Avoids cluttering the help in plain-diff sessions with
+    /// keys that wouldn't do anything.
+    pub help_review_sections: Vec<HelpSection>,
 }
 
 impl Strings {
@@ -72,7 +76,8 @@ impl Strings {
                     title: "Alignment".into(),
                     entries: vec![
                         e("click", "select that line; the *other* pane snaps"),
-                        e("wheel", "scroll pane under pointer"),
+                        e("[ / ]", "nudge alignment row up / down"),
+                        e("wheel", "scroll pane under pointer (diff only)"),
                         e("=", "re-snap non-anchor pane to alignment row"),
                     ],
                 },
@@ -92,6 +97,17 @@ impl Strings {
                     ],
                 },
             ],
+            help_review_sections: vec![HelpSection {
+                title: "Review".into(),
+                entries: vec![
+                    e("c", "open comment modal at cursor row"),
+                    e("S", "open submit modal (verdict + body)"),
+                    e("ctrl-s", "save draft (in comment) / submit (in submit modal)"),
+                    e("Tab", "(in submit) switch verdict ↔ body focus"),
+                    e("a / c / r", "(in submit · verdict) Approve / Comment / Request changes"),
+                    e("Esc", "close modal without saving"),
+                ],
+            }],
         }
     }
 
@@ -123,7 +139,8 @@ impl Strings {
                     title: "整列".into(),
                     entries: vec![
                         e("click", "その行を選択 — 反対ペインがスナップ"),
-                        e("wheel", "ポインタ下のペインをスクロール"),
+                        e("[ / ]", "整列行を 1 行上 / 下へ"),
+                        e("wheel", "ポインタ下のペインをスクロール (Diff のみ)"),
                         e("=", "非アンカー側を整列行に再同期"),
                     ],
                 },
@@ -143,6 +160,17 @@ impl Strings {
                     ],
                 },
             ],
+            help_review_sections: vec![HelpSection {
+                title: "レビュー".into(),
+                entries: vec![
+                    e("c", "カーソル行にコメントモーダルを開く"),
+                    e("S", "提出モーダルを開く (verdict + 本文)"),
+                    e("ctrl-s", "コメント保存 / 提出モーダルでは送信"),
+                    e("Tab", "提出モーダルで verdict ↔ 本文 を切替"),
+                    e("a / c / r", "提出 verdict 切替 (Approve / Comment / Request changes)"),
+                    e("Esc", "モーダルを閉じる (保存しない)"),
+                ],
+            }],
         }
     }
 }
