@@ -273,8 +273,11 @@ fn list_working_tree(root: &Path) -> Result<Vec<Entry>> {
 }
 
 /// Parse `git diff --name-status -z` output into entries.
-/// Each record is `<status>\t<path>\0`. With `--no-renames` we don't need to
-/// worry about the two-path rename form.
+///
+/// With `-z`, git separates the status field and the path with a NUL byte (not
+/// a tab as in the non-`-z` form), so each non-rename record occupies two
+/// NUL-separated fields: `<status>\0<path>\0`. With `--no-renames` we don't
+/// need to worry about the three-field rename form (`R<score>\0<src>\0<dst>\0`).
 fn list_diff_name_status(root: &Path, args: &[&str]) -> Result<Vec<Entry>> {
     let out = Command::new("git")
         .args(args)
@@ -289,20 +292,29 @@ fn list_diff_name_status(root: &Path, args: &[&str]) -> Result<Vec<Entry>> {
         );
     }
     let mut entries = Vec::new();
-    for rec in out.stdout.split(|&b| b == 0) {
-        if rec.is_empty() {
-            continue;
-        }
-        let s = std::str::from_utf8(rec).unwrap_or("");
-        let mut split = s.splitn(2, '\t');
-        let status = split.next().unwrap_or("?").to_string();
-        let path = split.next().unwrap_or("").to_string();
+    let mut fields = out.stdout.split(|&b| b == 0).filter(|f| !f.is_empty());
+    while let Some(status_field) = fields.next() {
+        let status = std::str::from_utf8(status_field).unwrap_or("?").to_string();
+        // Rename / copy entries carry an extra src field before the dst path.
+        // We're called with `--no-renames`, but be defensive in case a caller
+        // omits it.
+        let is_rename = status.starts_with('R') || status.starts_with('C');
+        let path_field = if is_rename {
+            fields.next();
+            fields.next()
+        } else {
+            fields.next()
+        };
+        let Some(path_bytes) = path_field else {
+            break;
+        };
+        let path = std::str::from_utf8(path_bytes).unwrap_or("").to_string();
         if path.is_empty() {
             continue;
         }
         // Pad status to 2 chars so the renderer's `.chars().next()` check
         // and existing color mapping behave the same as porcelain output.
-        let status_padded = if status.len() == 1 {
+        let status_padded = if status.chars().count() == 1 {
             format!("{status} ")
         } else {
             status

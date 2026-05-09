@@ -12,6 +12,23 @@ under `## [vX.Y.Z] - YYYY-MM-DD`, with the standard subsection headings
 
 ## [Unreleased]
 
+## [v0.1.1] - 2026-05-09
+
+### Fixed
+
+- `--range <from>..<to>` now lists files correctly. The previous parser
+  expected `<status>\t<path>` records, but `git diff --name-status -z`
+  separates the status and path with a NUL byte, which produced an empty
+  file list (and thus a blank diff view). The parser now reads paired
+  NUL-separated fields and tolerates rename/copy three-field records.
+- Files that contain hard tabs (Makefiles, Go sources, …) no longer
+  corrupt the TUI layout. Tab characters were being passed through to
+  the terminal verbatim, where they advanced the cursor to the next
+  hardware tab stop and trampled neighboring panes. Tabs are now
+  expanded to spaces against a 4-column tab stop relative to the start
+  of each rendered row, and other control characters are replaced with
+  a single space.
+
 ## [v0.1.0-rc.1] - 2026-05-09
 
 First release candidate. Shakedown for the cargo-dist pipeline; the

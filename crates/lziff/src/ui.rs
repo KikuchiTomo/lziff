@@ -732,7 +732,7 @@ fn render_pane_row(
     let mut used = 0usize;
     for seg in &line.segments {
         let style = segment_style(theme, line.kind, seg, is_left, bg);
-        let text = visible_truncate(&seg.text, text_w.saturating_sub(used));
+        let text = expand_render_text(&seg.text, used, text_w.saturating_sub(used));
         used += text.chars().count();
         spans.push(Span::styled(text, style));
         if used >= text_w {
@@ -746,6 +746,51 @@ fn render_pane_row(
         ));
     }
     (no_line, Line::from(spans))
+}
+
+/// Tab width used when expanding `\t` to spaces. Hard-coded for now;
+/// configurable later if anyone asks.
+const TAB_WIDTH: usize = 4;
+
+/// Normalize a segment text for rendering: expand tabs to the next tab stop
+/// (so Makefiles and other tab-indented files align correctly inside our
+/// fixed-width pane), and replace other control characters with a single
+/// space (so stray escape codes can't break the layout). `start_col` is the
+/// column already consumed within the row by previous segments, used to
+/// compute tab stops across segment boundaries.
+fn expand_render_text(text: &str, start_col: usize, max: usize) -> String {
+    if max == 0 {
+        return String::new();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut col = start_col;
+    let mut written = 0usize;
+    for ch in text.chars() {
+        if written >= max {
+            break;
+        }
+        if ch == '\t' {
+            let next_stop = ((col / TAB_WIDTH) + 1) * TAB_WIDTH;
+            let spaces = next_stop - col;
+            for _ in 0..spaces {
+                if written >= max {
+                    break;
+                }
+                out.push(' ');
+                col += 1;
+                written += 1;
+            }
+        } else if ch.is_control() {
+            out.push(' ');
+            col += 1;
+            written += 1;
+        } else {
+            out.push(ch);
+            col += 1;
+            written += 1;
+        }
+    }
+    out
 }
 
 fn segment_style(theme: &Theme, kind: LineKind, seg: &Segment, is_left: bool, row_bg: Color) -> Style {
@@ -806,14 +851,6 @@ fn line_bg(theme: &Theme, kind: LineKind, is_left: bool, is_alignment: bool) -> 
 fn lineno_width(lines: &[PaneLine]) -> usize {
     let max = lines.iter().map(|l| l.line_no).max().unwrap_or(1);
     max.to_string().len() + 2
-}
-
-fn visible_truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        s.chars().take(max).collect()
-    }
 }
 
 fn border_style(theme: &Theme, focused: bool) -> Style {

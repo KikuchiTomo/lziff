@@ -7,7 +7,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0-rc.1"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/KikuchiTomo/lziff"
@@ -16,8 +16,8 @@ homepage = "https://github.com/KikuchiTomo/lziff"
 [workspace.dependencies]
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
-review-protocol = { path = "crates/review-protocol", version = "0.1.0-rc.1" }
-lziff-github = { path = "crates/lziff-github", version = "0.1.0-rc.1" }
+review-protocol = { path = "crates/review-protocol", version = "0.1.1" }
+lziff-github = { path = "crates/lziff-github", version = "0.1.1" }
 
 [profile.release]
 lto = "thin"
