@@ -277,51 +277,53 @@ impl App {
         (l_stays, r_stays)
     }
 
-    /// Move the click-set snap anchor by one render row in the anchored
-    /// pane and resnap the other side to match. This is *not* the same as
-    /// j/k (which scrolls both panes); `[`/`]` re-binds the alignment to a
-    /// neighbouring line on the anchored side without changing where on
-    /// screen the alignment row sits, so the user can fine-tune the snap
-    /// after a click.
+    /// Move the alignment indicator (the dot in the gutter) up or down
+    /// one row on screen, then resnap the non-anchor pane to whatever the
+    /// anchor pane shows at the new cursor row. The anchor pane stays
+    /// scroll-locked — only the indicator moves. This is the fine-tune
+    /// counterpart to a click: clicking sets the snap anchor, `[`/`]`
+    /// shifts which line is anchored without scrolling the page.
     pub fn snap_step(&mut self, forward: bool) {
+        let viewport_h = self.layout.viewport_h as usize;
+        if viewport_h == 0 {
+            return;
+        }
+        let new_cy = if forward {
+            let max_cy = viewport_h.saturating_sub(1);
+            if self.cursor_y >= max_cy {
+                return;
+            }
+            self.cursor_y + 1
+        } else {
+            if self.cursor_y == 0 {
+                return;
+            }
+            self.cursor_y - 1
+        };
+        // Bounds check on the anchor-side render index — don't move the
+        // indicator past the end of the file.
+        let anchor_idx = match self.anchor_side {
+            AnchorSide::Left => self.left_top + new_cy,
+            AnchorSide::Right => self.right_top + new_cy,
+        };
+        let len = match self.anchor_side {
+            AnchorSide::Left => self.diff.left_render.len(),
+            AnchorSide::Right => self.diff.right_render.len(),
+        };
+        if anchor_idx >= len {
+            return;
+        }
+        self.cursor_y = new_cy;
+        // Resnap the non-anchor pane so its corresponding line lands at
+        // the new cursor row.
         match self.anchor_side {
             AnchorSide::Left => {
-                let cur = self.left_top + self.cursor_y;
-                let new_l = if forward {
-                    if cur + 1 >= self.diff.left_render.len() {
-                        return;
-                    }
-                    cur + 1
-                } else {
-                    if cur == 0 {
-                        return;
-                    }
-                    cur - 1
-                };
-                let r = self.diff.corresponding_right_for_left(new_l);
-                let cy = self.cursor_y.min(r);
-                self.cursor_y = cy;
-                self.left_top = new_l.saturating_sub(cy);
-                self.right_top = r.saturating_sub(cy);
+                let r = self.diff.corresponding_right_for_left(anchor_idx);
+                self.right_top = r.saturating_sub(new_cy);
             }
             AnchorSide::Right => {
-                let cur = self.right_top + self.cursor_y;
-                let new_r = if forward {
-                    if cur + 1 >= self.diff.right_render.len() {
-                        return;
-                    }
-                    cur + 1
-                } else {
-                    if cur == 0 {
-                        return;
-                    }
-                    cur - 1
-                };
-                let l = self.diff.corresponding_left_for_right(new_r);
-                let cy = self.cursor_y.min(l);
-                self.cursor_y = cy;
-                self.right_top = new_r.saturating_sub(cy);
-                self.left_top = l.saturating_sub(cy);
+                let l = self.diff.corresponding_left_for_right(anchor_idx);
+                self.left_top = l.saturating_sub(new_cy);
             }
         }
     }
