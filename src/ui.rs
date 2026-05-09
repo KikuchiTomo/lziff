@@ -97,7 +97,7 @@ fn render_files(f: &mut Frame, area: Rect, app: &App, layout: &mut LayoutCache) 
         .entries
         .iter()
         .map(|e| {
-            let color = status_color(&e.status);
+            let color = status_color(theme, &e.status);
             let mark_style = Style::default().fg(color).add_modifier(Modifier::BOLD);
             let name_style = Style::default().add_modifier(Modifier::BOLD);
             ListItem::new(Line::from(vec![
@@ -713,7 +713,14 @@ fn side_border_style(theme: &Theme, is_left: bool, focused: bool) -> Style {
     Style::default().fg(color)
 }
 
-fn status_color(status: &str) -> Color {
+fn status_color(theme: &Theme, status: &str) -> Color {
+    // Unmerged states from `git status --porcelain`: "DD", "AU", "UD", "UA",
+    // "DU", "AA", "UU". Any pair containing 'U', plus AA/DD which mean both
+    // sides did the same thing concurrently.
+    let trimmed = status.trim();
+    if status.contains('U') || matches!(trimmed, "AA" | "DD") {
+        return theme.status_conflict_fg;
+    }
     let c = status.chars().next().unwrap_or(' ');
     match c {
         'M' => Color::Yellow,

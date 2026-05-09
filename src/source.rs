@@ -320,6 +320,23 @@ fn load_working_tree(root: &Path, id: &str) -> Result<DiffPayload> {
     let path = root.join(id);
     let untracked = git_is_untracked(root, id)?;
 
+    // Merge-conflict detection: if either the "ours" (stage 2) or "theirs"
+    // (stage 3) blob exists in the index, we're in the middle of an
+    // unresolved merge. Show the two sides directly so the reviewer sees
+    // what each branch wanted, instead of "HEAD vs file-with-markers".
+    if !untracked {
+        let ours = git_show(root, &format!(":2:{id}")).ok();
+        let theirs = git_show(root, &format!(":3:{id}")).ok();
+        if ours.is_some() || theirs.is_some() {
+            return Ok(DiffPayload {
+                left_label: format!("ours:{id}"),
+                right_label: format!("theirs:{id}"),
+                left: ours.unwrap_or_default(),
+                right: theirs.unwrap_or_default(),
+            });
+        }
+    }
+
     let left = if untracked {
         String::new()
     } else {

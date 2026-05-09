@@ -141,6 +141,7 @@ pub struct Theme {
     pub help_desc_fg: Color,
     pub help_border_fg: Color,
     pub help_panel_bg: Color,
+    pub status_conflict_fg: Color,
 }
 
 impl Theme {
@@ -185,6 +186,7 @@ impl Theme {
             help_desc_fg: Color::Rgb(210, 215, 220),
             help_border_fg: Color::Rgb(120, 160, 220),
             help_panel_bg: Color::Rgb(20, 24, 32),
+            status_conflict_fg: Color::Rgb(245, 130, 80),
         }
     }
 }
@@ -378,6 +380,7 @@ raw_color_struct!(RawTheme {
     help_desc_fg,
     help_border_fg,
     help_panel_bg,
+    status_conflict_fg,
 });
 
 #[derive(Debug, Default, Deserialize)]
