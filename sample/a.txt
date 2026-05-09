@@ -1,0 +1,112 @@
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::{BufRead, BufReader};
+
+/// User account record loaded from the database.
+struct User {
+    id: u64,
+    name: String,
+    email: String,
+}
+
+/// Single legacy connection pulled from a global pool.
+struct Connection {
+    inner: rusqlite::Connection,
+}
+
+impl Connection {
+    fn open(path: &str) -> Result<Self, String> {
+        let inner = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
+        Ok(Self { inner })
+    }
+
+    fn query(&self, sql: &str, _params: &[&str]) -> Result<Vec<Row>, String> {
+        let mut stmt = self.inner.prepare(sql).map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| Ok(Row { values: vec![] }))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(rows)
+    }
+}
+
+struct Row {
+    values: Vec<String>,
+}
+
+impl Row {
+    fn get(&self, idx: usize) -> String {
+        self.values.get(idx).cloned().unwrap_or_default()
+    }
+}
+
+fn load_users(conn: &Connection) -> Vec<User> {
+    let rows = conn.query("SELECT id, name, email FROM users", &[]).unwrap();
+    let mut out = Vec::new();
+    for row in rows {
+        let id_str = row.get(0);
+        let id: u64 = id_str.parse().unwrap_or(0);
+        let name = row.get(1);
+        let email = row.get(2);
+        out.push(User { id, name, email });
+    }
+    out
+}
+
+fn validate_email(email: &str) -> bool {
+    email.contains('@')
+}
+
+fn group_by_domain(users: &[User]) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for u in users {
+        let domain = u.email.split('@').nth(1).unwrap_or("unknown");
+        *counts.entry(domain.to_string()).or_insert(0) += 1;
+    }
+    counts
+}
+
+fn read_blocklist(path: &str) -> Vec<String> {
+    let file = File::open(path).expect("blocklist missing");
+    let reader = BufReader::new(file);
+    let mut out = Vec::new();
+    for line in reader.lines() {
+        let line = line.unwrap();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        out.push(line.trim().to_string());
+    }
+    out
+}
+
+fn print_report(users: &[User], stats: &HashMap<String, usize>) {
+    println!("=== user report ===");
+    println!("loaded {} users", users.len());
+    println!("");
+    println!("by domain:");
+    for (domain, n) in stats {
+        println!("  {domain}: {n}");
+    }
+}
+
+fn main() {
+    let conn = Connection::open("app.db").unwrap();
+    let users = load_users(&conn);
+    let blocklist = read_blocklist("blocklist.txt");
+    let filtered: Vec<&User> = users
+        .iter()
+        .filter(|u| !blocklist.contains(&u.email))
+        .collect();
+    let owned: Vec<User> = filtered
+        .into_iter()
+        .map(|u| User {
+            id: u.id,
+            name: u.name.clone(),
+            email: u.email.clone(),
+        })
+        .collect();
+    let stats = group_by_domain(&owned);
+    print_report(&owned, &stats);
+}

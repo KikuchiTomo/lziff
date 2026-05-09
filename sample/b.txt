@@ -1,0 +1,140 @@
+use std::collections::HashMap;
+use std::time::SystemTime;
+
+/// User account record loaded from the primary database.
+#[derive(Debug, Clone)]
+struct User {
+    id: u64,
+    name: String,
+    email: String,
+    created_at: SystemTime,
+}
+
+/// Connection pool shared across worker tasks.
+struct Pool {
+    inner: deadpool_postgres::Pool,
+}
+
+impl Pool {
+    async fn connect(url: &str) -> Result<Self, DbError> {
+        let cfg = deadpool_postgres::Config::from_url(url)?;
+        let inner = cfg.create_pool(None, tokio_postgres::NoTls)?;
+        Ok(Self { inner })
+    }
+
+    async fn query(&self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<Vec<Row>, DbError> {
+        let client = self.inner.get().await?;
+        let rows = client.query(sql, params).await?;
+        Ok(rows.into_iter().map(Row::from).collect())
+    }
+}
+
+struct Row {
+    values: Vec<Value>,
+}
+
+impl Row {
+    fn get<T: FromValue>(&self, idx: usize) -> T {
+        self.values
+            .get(idx)
+            .and_then(|v| T::from_value(v))
+            .unwrap_or_default()
+    }
+}
+
+async fn fetch_users(pool: &Pool) -> Result<Vec<User>, DbError> {
+    let rows = pool
+        .query("SELECT id, name, email, created_at FROM users", &[])
+        .await?;
+    let users = rows
+        .into_iter()
+        .map(|row| User {
+            id: row.get(0),
+            name: row.get(1),
+            email: row.get(2),
+            created_at: row.get(3),
+        })
+        .collect();
+    Ok(users)
+}
+
+fn validate_email(email: &str) -> Result<(), EmailError> {
+    let trimmed = email.trim();
+    if trimmed.is_empty() {
+        return Err(EmailError::Empty);
+    }
+    if trimmed.len() > 254 {
+        return Err(EmailError::TooLong);
+    }
+    let parts: Vec<&str> = trimmed.split('@').collect();
+    if parts.len() != 2 {
+        return Err(EmailError::MalformedShape);
+    }
+    let (local, domain) = (parts[0], parts[1]);
+    if local.is_empty() || local.len() > 64 {
+        return Err(EmailError::InvalidLocalPart);
+    }
+    if domain.is_empty() || !domain.contains('.') {
+        return Err(EmailError::InvalidDomain);
+    }
+    if domain.starts_with('.') || domain.ends_with('.') {
+        return Err(EmailError::InvalidDomain);
+    }
+    for ch in trimmed.chars() {
+        if ch.is_control() || ch.is_whitespace() {
+            return Err(EmailError::InvalidCharacters);
+        }
+    }
+    Ok(())
+}
+
+fn normalize_email(email: &str) -> String {
+    let lower = email.trim().to_lowercase();
+    if let Some((local, domain)) = lower.split_once('@') {
+        let local_clean = local.split('+').next().unwrap_or(local);
+        format!("{local_clean}@{domain}")
+    } else {
+        lower
+    }
+}
+
+fn group_by_domain(users: &[User]) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for u in users {
+        let domain = u.email.split('@').nth(1).unwrap_or("unknown");
+        *counts.entry(domain.to_string()).or_insert(0) += 1;
+    }
+    counts
+}
+
+fn print_report(users: &[User], stats: &HashMap<String, usize>) {
+    let mut sorted: Vec<_> = stats.iter().collect();
+    sorted.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
+
+    println!("┌─────────────── user report ───────────────┐");
+    println!("│ total active users : {:>20} │", users.len());
+    println!("│ unique domains     : {:>20} │", stats.len());
+    println!("├────────────────────────────────────────────┤");
+    println!("│ top domains                                │");
+    for (domain, n) in sorted.iter().take(10) {
+        println!("│   {:<32} {:>6} │", domain, n);
+    }
+    println!("└────────────────────────────────────────────┘");
+}
+
+#[tokio::main]
+async fn main() -> Result<(), DbError> {
+    let pool = Pool::connect("postgres://localhost/app").await?;
+    let users = fetch_users(&pool).await?;
+    let valid: Vec<User> = users
+        .into_iter()
+        .filter(|u| validate_email(&u.email).is_ok())
+        .map(|mut u| {
+            u.email = normalize_email(&u.email);
+            u
+        })
+        .collect();
+    let stats = group_by_domain(&valid);
+    print_report(&valid, &stats);
+    Ok(())
+}
