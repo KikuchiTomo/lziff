@@ -1,5 +1,12 @@
 # lziff
 
+[![CI](https://img.shields.io/github/actions/workflow/status/KikuchiTomo/lziff/release.yml?branch=main&label=release&logo=github)](https://github.com/KikuchiTomo/lziff/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/KikuchiTomo/lziff?logo=github&color=blue)](https://github.com/KikuchiTomo/lziff/releases/latest)
+[![Homebrew tap](https://img.shields.io/badge/homebrew-KikuchiTomo%2Ftap-orange?logo=homebrew)](https://github.com/KikuchiTomo/homebrew-tap)
+[![License: MIT](https://img.shields.io/github/license/KikuchiTomo/lziff?color=informational)](./LICENSE)
+[![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](https://github.com/KikuchiTomo/lziff/releases/latest)
+[![Built with Rust](https://img.shields.io/badge/built%20with-Rust-dea584?logo=rust)](https://www.rust-lang.org/)
+
 A cross-platform terminal diff & review tool with JetBrains-style
 snap-aligned side-by-side diffs.
 
