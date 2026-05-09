@@ -8,7 +8,7 @@ cargo-dist-version = "0.31.0"
 # CI backends to support
 ci = "github"
 # The installers to generate for each app
-installers = ["shell", "powershell"]
+installers = ["shell", "powershell", "homebrew"]
 # Target platforms to build apps for (Rust target-triple syntax)
 targets = [
   "aarch64-apple-darwin",
@@ -19,7 +19,8 @@ targets = [
 ]
 # Where to host releases
 hosting = "github"
-# To enable Homebrew once the tap repo exists, create
-# `KikuchiTomo/homebrew-tap`, append "homebrew" to `installers`, and
-# uncomment:
-# tap = "KikuchiTomo/homebrew-tap"
+# Homebrew tap repository for `brew install KikuchiTomo/tap/lziff`.
+tap = "KikuchiTomo/homebrew-tap"
+# Push the formula to the tap on tagged releases (skip on pre-releases).
+publish-jobs = ["homebrew"]
+publish-prereleases = false
