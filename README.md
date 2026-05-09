@@ -1,6 +1,6 @@
 # lziff
 
-[![CI](https://img.shields.io/github/actions/workflow/status/KikuchiTomo/lziff/release.yml?branch=main&label=release&logo=github)](https://github.com/KikuchiTomo/lziff/actions/workflows/release.yml)
+[![Release CI](https://github.com/KikuchiTomo/lziff/actions/workflows/release.yml/badge.svg)](https://github.com/KikuchiTomo/lziff/actions/workflows/release.yml)
 [![Latest release](https://img.shields.io/github/v/release/KikuchiTomo/lziff?logo=github&color=blue)](https://github.com/KikuchiTomo/lziff/releases/latest)
 [![Homebrew tap](https://img.shields.io/badge/homebrew-KikuchiTomo%2Ftap-orange?logo=homebrew)](https://github.com/KikuchiTomo/homebrew-tap)
 [![License: MIT](https://img.shields.io/github/license/KikuchiTomo/lziff?color=informational)](./LICENSE)
