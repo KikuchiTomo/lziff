@@ -94,6 +94,74 @@ fn render_review_modal(f: &mut Frame, area: Rect, app: &App) {
             ]);
             f.render_widget(Paragraph::new(hint).style(Style::default().bg(theme.help_panel_bg)), layout[1]);
         }
+        Modal::Drafts(dm) => {
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .title(format!(
+                    " Drafts · {} pending ",
+                    review.drafts.len(),
+                ))
+                .border_style(Style::default().fg(theme.help_border_fg))
+                .style(Style::default().bg(theme.help_panel_bg));
+            let inner = block.inner(r);
+            f.render_widget(block, r);
+
+            let layout = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(1), Constraint::Length(1)])
+                .split(inner);
+
+            let items: Vec<ListItem> = review
+                .drafts
+                .iter()
+                .map(|d| {
+                    let side = match d.side {
+                        review_protocol::CommentSide::Old => "L",
+                        review_protocol::CommentSide::New => "R",
+                    };
+                    let head = Line::from(vec![
+                        Span::styled(
+                            format!(" {side} {}:{}  ", d.path, d.line),
+                            Style::default()
+                                .fg(theme.help_keys_fg)
+                                .bg(theme.help_panel_bg)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            // First line of the body, truncated — gives
+                            // the reader a hint without exploding row
+                            // height for multi-line drafts.
+                            d.body.lines().next().unwrap_or("").to_string(),
+                            Style::default().fg(theme.help_desc_fg).bg(theme.help_panel_bg),
+                        ),
+                    ]);
+                    ListItem::new(head)
+                })
+                .collect();
+            let list = List::new(items).highlight_style(
+                Style::default()
+                    .bg(theme.list_focus_bg)
+                    .add_modifier(Modifier::BOLD),
+            );
+            let mut state = ListState::default();
+            state.select(Some(dm.selected.min(review.drafts.len().saturating_sub(1))));
+            f.render_stateful_widget(list, layout[0], &mut state);
+
+            let hint = Line::from(vec![
+                Span::styled(" j/k ", Style::default().fg(theme.help_keys_fg)),
+                Span::styled("move    ", Style::default().fg(theme.help_desc_fg)),
+                Span::styled(" Enter ", Style::default().fg(theme.help_keys_fg)),
+                Span::styled("edit    ", Style::default().fg(theme.help_desc_fg)),
+                Span::styled(" x/Del ", Style::default().fg(theme.help_keys_fg)),
+                Span::styled("delete    ", Style::default().fg(theme.help_desc_fg)),
+                Span::styled(" Esc ", Style::default().fg(theme.help_keys_fg)),
+                Span::styled("close", Style::default().fg(theme.help_desc_fg)),
+            ]);
+            f.render_widget(
+                Paragraph::new(hint).style(Style::default().bg(theme.help_panel_bg)),
+                layout[1],
+            );
+        }
         Modal::Submit(m) => {
             let block = Block::default()
                 .borders(Borders::ALL)
@@ -170,7 +238,7 @@ fn render_title(f: &mut Frame, area: Rect, app: &App) {
     let theme = &app.config.theme;
     let (l, r) = app.header_label();
     let (a, d, m) = app.change_summary();
-    let title = Line::from(vec![
+    let mut spans = vec![
         Span::styled(
             " lziff ",
             Style::default()
@@ -188,8 +256,22 @@ fn render_title(f: &mut Frame, area: Rect, app: &App) {
         Span::styled(format!("-{d}"), Style::default().fg(Color::Red)),
         Span::raw(" "),
         Span::styled(format!("~{m}"), Style::default().fg(Color::Yellow)),
-    ]);
-    f.render_widget(Paragraph::new(title), area);
+    ];
+    // Draft count: shown only in review mode, always present (even at 0)
+    // so the position is stable as drafts come and go.
+    if let Some(review) = app.review.as_ref() {
+        spans.push(Span::raw("   "));
+        let n = review.drafts.len();
+        let style = if n > 0 {
+            Style::default()
+                .fg(theme.help_keys_fg)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Rgb(120, 120, 120))
+        };
+        spans.push(Span::styled(format!("💬 {n}"), style));
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 fn render_files(f: &mut Frame, area: Rect, app: &App, layout: &mut LayoutCache) {
@@ -322,6 +404,25 @@ fn render_diff(f: &mut Frame, area: Rect, app: &App, layout: &mut LayoutCache) {
     let l_text_w = l_cols[1].width as usize;
     let r_text_w = r_cols[1].width as usize;
 
+    // Draft-marker resolution: when running with `--review`, the gutter
+    // shows a "✱" next to any line that has a buffered draft, so the
+    // user can see at a glance where they've already commented.
+    let cur_path: &str = app
+        .entries
+        .get(app.selected)
+        .map(|e| e.id.as_str())
+        .unwrap_or("");
+    let has_draft = |is_left: bool, line_no: usize| -> bool {
+        let Some(review) = app.review.as_ref() else {
+            return false;
+        };
+        let side = if is_left {
+            review_protocol::CommentSide::Old
+        } else {
+            review_protocol::CommentSide::New
+        };
+        review.has_draft_at(cur_path, line_no as u32, side)
+    };
     for y in 0..viewport_h {
         let li_render = app.left_top + y;
         let ri_render = app.right_top + y;
@@ -337,8 +438,14 @@ fn render_diff(f: &mut Frame, area: Rect, app: &App, layout: &mut LayoutCache) {
             .and_then(|opt| opt.as_ref().and_then(|&i| app.diff.right.get(i)));
         let is_alignment = y == cursor_y;
 
-        let (lno, ltxt) = render_pane_row(theme, l_line, true, is_alignment, l_text_w, lineno_w_l);
-        let (rno, rtxt) = render_pane_row(theme, r_line, false, is_alignment, r_text_w, lineno_w_r);
+        let l_draft = l_line.map_or(false, |l| has_draft(true, l.line_no));
+        let r_draft = r_line.map_or(false, |l| has_draft(false, l.line_no));
+        let (lno, ltxt) = render_pane_row(
+            theme, l_line, true, is_alignment, l_text_w, lineno_w_l, l_draft,
+        );
+        let (rno, rtxt) = render_pane_row(
+            theme, r_line, false, is_alignment, r_text_w, lineno_w_r, r_draft,
+        );
         l_no_lines.push(lno);
         l_text_lines.push(ltxt);
         r_no_lines.push(rno);
@@ -769,6 +876,7 @@ fn render_pane_row(
     is_alignment: bool,
     text_w: usize,
     lineno_w: usize,
+    has_draft: bool,
 ) -> (Line<'static>, Line<'static>) {
     let Some(line) = line else {
         let bg = if is_alignment {
@@ -781,9 +889,31 @@ fn render_pane_row(
     };
     let bg = line_bg(theme, line.kind, is_left, is_alignment);
 
-    let no_text = format!(" {:>width$} ", line.line_no, width = lineno_w.saturating_sub(2));
-    let no_style = Style::default().fg(theme.fg_gutter).bg(bg);
-    let no_line = Line::from(Span::styled(no_text, no_style));
+    // Layout of the line-number gutter: "<marker><lineno> ". The marker
+    // takes the leading space — it's a draft glyph when this line has a
+    // pending comment, otherwise an empty space so column widths stay
+    // stable across rows.
+    let no_inner_w = lineno_w.saturating_sub(2);
+    let no_line = if has_draft {
+        Line::from(vec![
+            Span::styled(
+                "✱".to_string(),
+                Style::default()
+                    .fg(theme.help_keys_fg)
+                    .bg(bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{:>width$} ", line.line_no, width = no_inner_w),
+                Style::default().fg(theme.fg_gutter).bg(bg),
+            ),
+        ])
+    } else {
+        Line::from(Span::styled(
+            format!(" {:>width$} ", line.line_no, width = no_inner_w),
+            Style::default().fg(theme.fg_gutter).bg(bg),
+        ))
+    };
 
     let mut spans: Vec<Span> = Vec::new();
     let mut used = 0usize;

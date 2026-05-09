@@ -101,6 +101,7 @@ impl Strings {
                 title: "Review".into(),
                 entries: vec![
                     e("c", "open comment modal at cursor row"),
+                    e("d", "list buffered drafts (Enter edit · x delete)"),
                     e("S", "open submit modal (verdict + body)"),
                     e("ctrl-s", "save draft (in comment) / submit (in submit modal)"),
                     e("Tab", "(in submit) switch verdict ↔ body focus"),
@@ -164,6 +165,7 @@ impl Strings {
                 title: "レビュー".into(),
                 entries: vec![
                     e("c", "カーソル行にコメントモーダルを開く"),
+                    e("d", "ドラフト一覧 (Enter で編集・x で削除)"),
                     e("S", "提出モーダルを開く (verdict + 本文)"),
                     e("ctrl-s", "コメント保存 / 提出モーダルでは送信"),
                     e("Tab", "提出モーダルで verdict ↔ 本文 を切替"),

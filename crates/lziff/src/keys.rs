@@ -83,6 +83,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Action {
         }
         ConfigAction::SnapUp => app.snap_step(false),
         ConfigAction::SnapDown => app.snap_step(true),
+        ConfigAction::OpenDrafts => {
+            if let Some(r) = app.review.as_mut() {
+                r.open_drafts();
+            }
+        }
     }
     Action::Continue
 }
@@ -107,9 +112,18 @@ fn handle_modal_key(app: &mut App, key: KeyEvent) -> Action {
         match review.modal {
             Some(Modal::Comment(_)) => review.save_comment_draft(),
             Some(Modal::Submit(_)) => review.submit(),
+            // Ctrl-S in the drafts list is a no-op — there's nothing to
+            // save from there, only navigation/edit/delete.
+            Some(Modal::Drafts(_)) => {}
             None => {}
         }
         return Action::Continue;
+    }
+
+    // The drafts modal has its own non-textarea key handling — handle it
+    // before grabbing a mutable borrow on the modal.
+    if matches!(review.modal, Some(Modal::Drafts(_))) {
+        return handle_drafts_modal_key(review, key);
     }
 
     // Otherwise route into the open modal.
@@ -120,6 +134,7 @@ fn handle_modal_key(app: &mut App, key: KeyEvent) -> Action {
         Modal::Comment(m) => {
             m.textarea.input(crossterm_to_input(key));
         }
+        Modal::Drafts(_) => unreachable!("handled above"),
         Modal::Submit(m) => {
             if matches!(key.code, KeyCode::Tab) {
                 m.focus = match m.focus {
@@ -147,6 +162,40 @@ fn handle_modal_key(app: &mut App, key: KeyEvent) -> Action {
             }
             m.textarea.input(crossterm_to_input(key));
         }
+    }
+    Action::Continue
+}
+
+fn handle_drafts_modal_key(
+    review: &mut crate::review_session::ReviewSession,
+    key: KeyEvent,
+) -> Action {
+    let count = review.drafts.len();
+    let Some(Modal::Drafts(m)) = &mut review.modal else {
+        return Action::Continue;
+    };
+    match key.code {
+        KeyCode::Down | KeyCode::Char('j') => {
+            if m.selected + 1 < count {
+                m.selected += 1;
+            }
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            if m.selected > 0 {
+                m.selected -= 1;
+            }
+        }
+        KeyCode::Home | KeyCode::Char('g') => m.selected = 0,
+        KeyCode::End | KeyCode::Char('G') => m.selected = count.saturating_sub(1),
+        KeyCode::Enter => {
+            let i = m.selected;
+            review.edit_draft(i);
+        }
+        KeyCode::Char('x') | KeyCode::Delete => {
+            let i = m.selected;
+            review.delete_draft(i);
+        }
+        _ => {}
     }
     Action::Continue
 }

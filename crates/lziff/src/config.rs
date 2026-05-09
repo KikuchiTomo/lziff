@@ -46,6 +46,10 @@ pub enum Action {
     /// pane and resnap the other side. Distinct from j/k (which scrolls).
     SnapUp,
     SnapDown,
+    /// Open the buffered-drafts modal (list of pending draft comments
+    /// with edit / delete shortcuts). No-op outside `--review` mode or
+    /// when there are no drafts yet.
+    OpenDrafts,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -101,6 +105,7 @@ impl Keymap {
                 b("G", Action::Bottom),
                 b("c", Action::OpenComment),
                 b("S", Action::OpenSubmit),
+                b("d", Action::OpenDrafts),
                 b("Enter", Action::EnterDiff),
                 b("[", Action::SnapUp),
                 b("]", Action::SnapDown),
@@ -546,6 +551,7 @@ fn parse_action(s: &str) -> Option<Action> {
         "open_submit" => Action::OpenSubmit,
         "snap_up" => Action::SnapUp,
         "snap_down" => Action::SnapDown,
+        "open_drafts" => Action::OpenDrafts,
         _ => return None,
     })
 }
