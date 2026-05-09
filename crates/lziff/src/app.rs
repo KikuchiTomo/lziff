@@ -77,7 +77,11 @@ impl App {
             right_top: 0,
             cursor_y: 0,
             anchor_side: AnchorSide::Left,
-            focus: if show_files { Focus::Files } else { Focus::Diff },
+            // Default focus is the Diff pane: most sessions are spent
+            // reading the diff, and starting on Files makes wheel/key
+            // events route to the file list until the user explicitly
+            // tabs over. Click or Tab still moves focus to Files.
+            focus: Focus::Diff,
             show_help: false,
             status: String::new(),
             layout: LayoutCache::default(),
@@ -527,10 +531,12 @@ impl App {
         if rect_contains(self.layout.diff_left_inner, x, y)
             || rect_contains(self.layout.diff_right_inner, x, y)
         {
-            if down {
-                self.cursor_down(step);
-            } else {
-                self.cursor_up(step);
+            // Bypass `cursor_{down,up}` here — those route to file
+            // selection when the keyboard focus is on Files, but a wheel
+            // event over the diff pane should always scroll the diff
+            // regardless of where focus happens to be.
+            for _ in 0..step {
+                self.scroll_one(down);
             }
         }
     }
