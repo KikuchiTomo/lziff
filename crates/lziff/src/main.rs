@@ -77,7 +77,7 @@ struct Cli {
     /// otherwise lziff fetches the head into a `git worktree` under
     /// `~/.cache/lziff/review/` and cleans it up on exit. Pass `--review`
     /// alone (no value) to open a picker listing PRs with you as a
-    /// requested reviewer.
+    /// requested reviewer. Add `--all` to list all open PRs instead.
     #[arg(
         long,
         value_name = "PR",
@@ -86,6 +86,11 @@ struct Cli {
         conflicts_with_all = ["staged", "commit", "range"]
     )]
     review: Option<String>,
+
+    /// With `--review` (no value): show all open PRs instead of only
+    /// those where you are a requested reviewer.
+    #[arg(long, requires = "review")]
+    all: bool,
 }
 
 fn main() -> Result<()> {
@@ -155,7 +160,7 @@ fn prepare(cli: &Cli) -> Result<Prep> {
         let resolved: String = if spec.is_empty() {
             let provider =
                 review::make_picker_provider().context("no review backend available")?;
-            match picker::pick_pr(provider.as_ref())? {
+            match picker::pick_pr(provider.as_ref(), !cli.all)? {
                 Some(n) => n.to_string(),
                 None => {
                     eprintln!("lziff: cancelled.");

@@ -31,17 +31,25 @@ use std::time::Duration;
 /// Run the picker. Returns the selected PR number, or `None` if the user
 /// cancelled. Errors come from either the backend list call or terminal
 /// setup.
-pub fn pick_pr(provider: &dyn ReviewProvider) -> Result<Option<u64>> {
+///
+/// `assigned_to_me` — when `true` (default) only lists PRs where the
+/// current user is a requested reviewer; when `false` lists all open PRs.
+pub fn pick_pr(provider: &dyn ReviewProvider, assigned_to_me: bool) -> Result<Option<u64>> {
     let prs = provider
         .list_pull_requests(ListQuery {
-            assigned_to_me: true,
+            assigned_to_me,
             state: Some(PrState::Open),
         })
         .map_err(|e| anyhow::anyhow!("{e}"))
         .context("list pull requests")?;
 
     if prs.is_empty() {
-        eprintln!("lziff: no open pull requests with `review-requested:@me`.");
+        let filter = if assigned_to_me {
+            "`review-requested:@me`"
+        } else {
+            "open"
+        };
+        eprintln!("lziff: no {filter} pull requests found.");
         return Ok(None);
     }
 
@@ -51,7 +59,7 @@ pub fn pick_pr(provider: &dyn ReviewProvider) -> Result<Option<u64>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let result = run_picker_loop(&mut terminal, &prs);
+    let result = run_picker_loop(&mut terminal, &prs, assigned_to_me);
 
     disable_raw_mode()?;
     execute!(
@@ -67,10 +75,11 @@ pub fn pick_pr(provider: &dyn ReviewProvider) -> Result<Option<u64>> {
 fn run_picker_loop<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     prs: &[PrSummary],
+    assigned_to_me: bool,
 ) -> Result<Option<u64>> {
     let mut selected = 0usize;
     loop {
-        terminal.draw(|f| render(f, prs, selected))?;
+        terminal.draw(|f| render(f, prs, selected, assigned_to_me))?;
         if event::poll(Duration::from_millis(200))? {
             match event::read()? {
                 Event::Key(k) if k.kind == KeyEventKind::Press => match k.code {
@@ -100,7 +109,7 @@ fn run_picker_loop<B: ratatui::backend::Backend>(
     }
 }
 
-fn render(f: &mut Frame, prs: &[PrSummary], selected: usize) {
+fn render(f: &mut Frame, prs: &[PrSummary], selected: usize, assigned_to_me: bool) {
     let area = f.area();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -111,12 +120,17 @@ fn render(f: &mut Frame, prs: &[PrSummary], selected: usize) {
         ])
         .split(area);
 
-    render_title(f, chunks[0], prs.len());
+    render_title(f, chunks[0], prs.len(), assigned_to_me);
     render_list(f, chunks[1], prs, selected);
     render_hint(f, chunks[2]);
 }
 
-fn render_title(f: &mut Frame, area: Rect, count: usize) {
+fn render_title(f: &mut Frame, area: Rect, count: usize, assigned_to_me: bool) {
+    let filter_label = if assigned_to_me {
+        "review-requested:@me"
+    } else {
+        "all open PRs"
+    };
     let title = Line::from(vec![
         Span::styled(
             " lziff ",
@@ -127,7 +141,7 @@ fn render_title(f: &mut Frame, area: Rect, count: usize) {
         ),
         Span::raw(" "),
         Span::styled(
-            "review-requested:@me",
+            filter_label,
             Style::default().fg(Color::Rgb(225, 200, 130)),
         ),
         Span::raw("   "),
