@@ -10,7 +10,18 @@
 A cross-platform terminal diff & review tool with JetBrains-style
 snap-aligned side-by-side diffs.
 
-<!-- screenshot here -->
+### Demo Screenshot
+
+| File diff | Screenshot                                     |
+| --------- | ---------------------------------------------- |
+| View Diff | ![file_diff_demo.gif](figs/file_diff_demo.gif) |
+
+| Review Mode      | Screenshot                                       |
+| ---------------- | ------------------------------------------------ |
+| Select PR        | ![review_demo_102.png](figs/review_demo_102.png) |
+| PR diff          | ![review_demo_118.png](figs/review_demo_118.png) |
+| Review / Comment | ![review_demo_136.png](figs/review_demo_136.png) |
+| Submit Review    | ![review_demo_205.png](figs/review_demo_205.png) |
 
 ## What it does
 
