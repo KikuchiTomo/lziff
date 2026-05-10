@@ -31,10 +31,29 @@ snap-aligned side-by-side diffs.
 
 ## Install
 
+### Homebrew (macOS / Linux)
+
 ```sh
-# From source (Rust 1.74+):
+brew install KikuchiTomo/tap/lziff
+```
+
+### cargo (crates.io)
+
+```sh
+cargo install lziff
+```
+
+### From source (Rust 1.74+)
+
+```sh
 cargo install --git https://github.com/KikuchiTomo/lziff
 ```
+
+### Pre-built binaries
+
+Download the latest binary for your platform from the
+[Releases page](https://github.com/KikuchiTomo/lziff/releases/latest)
+and put it somewhere on your `$PATH`.
 
 ## Usage
 
