@@ -34,7 +34,10 @@ echo "Waiting for $crate v$version on crates.io…"
 attempts=90
 sleep_s=5
 for i in $(seq 1 "$attempts"); do
+  # crates.io's data-access policy rejects requests without a
+  # User-Agent identifying the caller with 403.
   if curl --fail --silent --show-error \
+       --user-agent "lziff-ci (https://github.com/KikuchiTomo/lziff)" \
        "https://crates.io/api/v1/crates/${crate}/${version}" \
        -o /dev/null; then
     echo "$crate v$version is live (attempt $i)."
