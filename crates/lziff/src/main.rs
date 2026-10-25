@@ -218,7 +218,10 @@ fn run_loop<B: ratatui::backend::Backend>(
     let tick = Duration::from_millis(app.config.behavior.tick_ms);
     let mut last_tick = Instant::now();
     loop {
-        terminal.draw(|f| ui::render(f, app))?;
+        terminal.draw(|f| {
+            ui::render(f, app);
+            ui::scrub_control_chars(f.buffer_mut());
+        })?;
         let timeout = tick.saturating_sub(last_tick.elapsed());
         if event::poll(timeout)? {
             match event::read()? {

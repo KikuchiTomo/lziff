@@ -2,6 +2,7 @@ use crate::app::{AnchorSide, App, Focus, LayoutCache};
 use crate::config::Theme;
 use crate::diff::{AlignSegment, LineKind, PaneLine, Segment, SegmentKind};
 use ratatui::{
+    buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -1219,4 +1220,40 @@ fn render_help(f: &mut Frame, area: Rect, app: &App) {
         .border_style(Style::default().fg(theme.help_border_fg).bg(bg));
     let p = Paragraph::new(lines).block(block);
     f.render_widget(p, r);
+}
+
+/// Blank out every cell whose symbol contains a control character.
+///
+/// Run this on the frame buffer after all widgets have rendered. Text from
+/// untrusted sources (PR titles, authors, branch names, file paths in a
+/// reviewed PR, git/gh error messages) can carry ESC/CSI/OSC sequences,
+/// and ratatui's `Span` rendering writes them to the terminal verbatim —
+/// which would let a malicious PR rewrite the screen, change the window
+/// title, or set the clipboard via OSC 52. Scrubbing the final buffer
+/// covers every render path in one place.
+pub fn scrub_control_chars(buf: &mut Buffer) {
+    for cell in buf.content.iter_mut() {
+        if cell.symbol().chars().any(char::is_control) {
+            cell.set_symbol(" ");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scrub_control_chars_blanks_escape_sequences() {
+        let mut buf = Buffer::empty(Rect::new(0, 0, 16, 1));
+        let line = Line::from(Span::raw("a\x1b]52;c;eA==\x07b"));
+        ratatui::widgets::Widget::render(line, buf.area, &mut buf);
+        assert!(buf.content.iter().any(|c| c.symbol().contains('\x1b')));
+        scrub_control_chars(&mut buf);
+        assert!(buf
+            .content
+            .iter()
+            .all(|c| !c.symbol().chars().any(char::is_control)));
+        assert_eq!(buf.content[0].symbol(), "a");
+    }
 }

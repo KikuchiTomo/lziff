@@ -12,6 +12,11 @@ on:
 # Don't queue concurrent publishes for the same tag — `cargo publish`
 # is not idempotent (it fails if the version already exists), so one
 # in-flight job at a time is enough.
+# Publishing only needs to read the repo; the crates.io token is a
+# separate secret, so keep the GITHUB_TOKEN read-only.
+permissions:
+  contents: read
+
 concurrency:
   group: publish-crates-${{ github.ref }}
   cancel-in-progress: false
