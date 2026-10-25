@@ -79,7 +79,10 @@ fn run_picker_loop<B: ratatui::backend::Backend>(
 ) -> Result<Option<u64>> {
     let mut selected = 0usize;
     loop {
-        terminal.draw(|f| render(f, prs, selected, assigned_to_me))?;
+        terminal.draw(|f| {
+            render(f, prs, selected, assigned_to_me);
+            crate::ui::scrub_control_chars(f.buffer_mut());
+        })?;
         if event::poll(Duration::from_millis(200))? {
             match event::read()? {
                 Event::Key(k) if k.kind == KeyEventKind::Press => match k.code {
